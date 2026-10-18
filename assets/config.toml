@@ -1,0 +1,39 @@
+# weichzelle global config. Applies to every sandbox VM.
+# Agents can never see or change this file.
+
+[vm]
+cpus = 4
+memory_mib = 4096
+
+# Identity for commits made inside the VMs.
+[git]
+name = "Your Name"
+email = "you@example.com"
+
+# Global mise tools, installed in every VM on each start.
+# Bump a version and restart the VM to update (no rebuild needed).
+[tools]
+claude = "latest"
+herdr = "latest"
+"aqua:anomalyco/opencode" = "latest"
+gh = "latest"
+
+[network]
+# Deny by default. Entries: "host", "*.suffix" or "preset:<name>".
+# Presets: llm, github, mise, opencode, npm, pypi, cargo, go, node.
+allow = ["preset:llm", "preset:github", "preset:mise", "preset:opencode"]
+
+# Secrets: the VM only sees a placeholder. The real value is substituted
+# only in the listed headers, only on requests to the listed hosts.
+# source = "keyring:<name>" (set with `weichzelle secret set <name>`) or "env:<VAR>".
+# Claude subscription: create the token with `claude setup-token` on the host.
+# For an API key instead, use ANTHROPIC_API_KEY with headers ["x-api-key"].
+[secrets.CLAUDE_CODE_OAUTH_TOKEN]
+source = "keyring:claude"
+hosts = ["api.anthropic.com"]
+headers = ["authorization"]
+
+[secrets.GH_TOKEN]
+source = "keyring:github"
+hosts = ["github.com", "api.github.com"]
+headers = ["authorization"]
