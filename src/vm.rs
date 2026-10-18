@@ -14,7 +14,7 @@ const LABEL_REPO: &str = "weichzelle.repo";
 const GUEST_USER: &str = "agent";
 const PROVISION: &str = include_str!("../assets/provision.sh");
 
-fn vm_name(name: &str) -> String {
+pub fn vm_name(name: &str) -> String {
     format!("{PREFIX}{name}")
 }
 

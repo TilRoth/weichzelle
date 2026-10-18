@@ -1,5 +1,6 @@
 mod config;
 mod image;
+mod logs;
 mod network;
 mod secrets;
 mod vm;
@@ -47,6 +48,13 @@ enum Cmd {
     },
     /// List weichzelle VMs.
     List,
+    /// Show what the VM tried to reach and was denied.
+    Logs {
+        name: String,
+        /// Egress denials (currently the only log).
+        #[arg(long, required = true)]
+        egress: bool,
+    },
     /// Manage secret values in the OS keyring.
     Secret {
         #[command(subcommand)]
@@ -69,6 +77,7 @@ fn main() -> Result<()> {
         Cmd::Init => return config::init(),
         Cmd::Secret { command: SecretCmd::Set { name } } => return secrets::set(name),
         Cmd::Secret { command: SecretCmd::Delete { name } } => return secrets::delete(name),
+        Cmd::Logs { name, .. } => return logs::egress(&vm::vm_name(name), name),
         _ => {}
     }
 
@@ -93,7 +102,7 @@ fn main() -> Result<()> {
             Cmd::Rebuild { name, force } => vm::rebuild(&config, &name, force).await,
             Cmd::Destroy { name, force } => vm::destroy(&config, &name, force).await.map(|_| ()),
             Cmd::List => vm::list().await,
-            Cmd::Init | Cmd::Secret { .. } => unreachable!(),
+            Cmd::Init | Cmd::Secret { .. } | Cmd::Logs { .. } => unreachable!(),
         }
     })
 }

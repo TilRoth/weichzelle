@@ -31,7 +31,7 @@ if compgen -G 'mise.toml' >/dev/null || compgen -G '.mise.toml' >/dev/null \
    || compgen -G 'mise/config.toml' >/dev/null || compgen -G '.tool-versions' >/dev/null; then
   log "installing project toolchain"
   if ! { mise trust --yes . && mise install --yes; }; then
-    log "warning: project toolchain install failed (missing egress? see: weichzelle logs --egress)"
+    log "warning: project toolchain install failed (missing egress? see: weichzelle logs $(basename "$WZ_REPO_DIR") --egress)"
   fi
 fi
 

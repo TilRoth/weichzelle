@@ -28,12 +28,18 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
 
 ## Inside the VM
 
-- **One global Containerfile:** OS packages, mise, git, gh.
+- **One global Containerfile:** Debian trixie with OS packages, git, jq and
+  mise. Built with podman (or buildah or docker) and imported into
+  microsandbox. The image tag is a hash of the Containerfile, so editing it
+  triggers a new build on the next `create` or `rebuild`.
+- **Non-root user:** agents run as `agent` (uid 1000) with passwordless sudo.
+  Claude Code refuses bypass mode as root. sudo gives nothing extra, because
+  the VM is the boundary.
 - **mise:** weichzelle writes the global mise config (`~/.config/mise/config.toml`)
   on every VM start: herdr and harnesses as standalone binaries, versions pinned
   in the host config. Updating = bump version on host, restart VM. The repo's own
   `mise.toml` provides the project toolchain and is never modified.
-  Backends: `claude` (native binary), `herdr` (GitHub release),
+  Backends: `claude` (native binary), `herdr` (GitHub release), `gh`,
   `opencode` pinned to `aqua:anomalyco/opencode` (the default ≥ 2.0 backend is
   npm and would depend on the project's Node).
 - **herdr** coordinates agents. Agents can see and drive each other via the
@@ -41,7 +47,18 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
   outside the VM.
 - **Harness profiles:** pre-written harness config that skips first-run and
   trust dialogs. Permission flags (e.g. `--auto`) are chosen when starting an
-  agent. Adding a harness = a mise entry plus a profile.
+  agent. Adding a harness = a mise entry plus a profile. Claude Code's profile
+  sets the onboarding and trust flags in `~/.claude.json` and turns off
+  auto-updates. It doesn't set bypass mode as the default; pass
+  `--dangerously-skip-permissions` when starting.
+- **Provisioning** (`assets/provision.sh`) runs as `agent` on every start, and
+  must be idempotent. It writes the global mise config and installs it, sets
+  the git identity and a credential helper that answers with the `GH_TOKEN`
+  placeholder, clones the repo on the first run, installs the repo's mise
+  toolchain (a failure only warns), and writes the harness profiles.
+- **Environment:** `SHELL=/bin/bash` (herdr panes otherwise get `/bin/sh`,
+  with no line editing), `NODE_EXTRA_CA_CERTS` pointing at the interception
+  CA, and update checks turned off.
 
 ## Access
 
@@ -58,16 +75,28 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
   settings. Never visible to the VM.
 - **Secrets:** the VM only sees placeholders. The host injects the real value
   only on requests to the hosts listed for that secret (microsandbox TLS
-  interception). Values come from the host keyring. Generic
-  `{env, hosts, header}` entries, starting with Anthropic (API key) and GitHub.
+  interception). Values come from the host keyring
+  (`weichzelle secret set|delete <name>`) or a host env var. Generic
+  `{env, hosts, headers}` entries. Defaults: `CLAUDE_CODE_OAUTH_TOKEN`
+  (subscription token from `claude setup-token`) and `GH_TOKEN`. Both Claude
+  Code and gh accept the placeholder.
   Substitution is restricted to the credential header (`header_fields`).
   Secrets are passed to microsandbox as **host environment references, never
   raw values**: raw values get persisted in the host-side sandbox config.
 - **Egress:** deny by default, plus presets (`llm`, `github`, `mise`,
   per-ecosystem registries). Rules match whole hostnames only (no paths). DNS
-  limited to allowlisted names. Denied requests are logged. The `mise` preset
-  includes `storage.googleapis.com` (Claude Code downloads). Exact preset host
-  lists are found empirically: deny-all, run the install, read the deny log.
+  limited to allowlisted names; other names get NXDOMAIN. The policy is fixed
+  at create time, so changing it needs `rebuild`. The `mise` preset includes
+  `storage.googleapis.com` (Claude Code downloads) and
+  `tuf-repo-cdn.sigstore.dev` (attestation checks for GitHub releases, e.g.
+  gh). The `opencode` preset allows `models.dev`. Exact preset host lists are
+  found empirically: deny-all, run the install, read the deny log.
+- **Deny log:** microsandbox logs denials at debug level in the per-VM
+  runtime log, which rotates every 10 MB (four files). Debug output is mostly
+  device noise, so the log covers about the last 40 minutes of heavy use.
+  `weichzelle logs <name> --egress` sums up denials per target. Known
+  denials, left blocked: `herdr.dev` (herdr) and `downloads.claude.ai`
+  (Claude Code).
 - **Resources:** fixed vCPU and memory per VM; defaults in the config.
 
 ## CLI (v1)
@@ -80,6 +109,8 @@ weichzelle rebuild <name> [--force]          # wipe and recreate
 weichzelle destroy <name> [--force]
 weichzelle list
 weichzelle logs <name> --egress              # denied requests
+weichzelle init                              # write default config
+weichzelle secret set|delete <name>          # keyring values
 ```
 
 ## Accepted risks
@@ -102,9 +133,10 @@ weichzelle logs <name> --egress              # denied requests
    upper). Only virtiofs: a small runtime mount (`/.msb`). Networking is
    virtio-net into microsandbox's smoltcp stack (not libkrun TSI).
 3. **TTY:** interactive attach gives a real PTY with resize handling. The
-   detach key (default `Ctrl-]`) is configurable. Still to test with herdr.
-4. **mise:** see "Inside the VM". Still to check that the aqua opencode backend
-   carries current versions.
+   detach key (default `Ctrl-]`) is configurable. Works with herdr. The herdr
+   server keeps running after you detach, so sessions survive.
+4. **mise:** see "Inside the VM". The aqua opencode backend carries current
+   versions (1.19.3 when tested).
 5. **mise egress:** GitHub hosts (incl. release-asset CDN,
    `raw.githubusercontent.com`), `mise-versions.jdx.dev`,
    `storage.googleapis.com`, plus per-language hosts (`nodejs.org`, …).
@@ -112,7 +144,6 @@ weichzelle logs <name> --egress              # denied requests
 
 ## Future work
 
-- Subscription login via `claude setup-token`.
 - Per-repo config sections with repo-scoped tokens.
 - GitHub App for short-lived tokens.
 - Automated `weichzelle selftest`, re-run on every microsandbox upgrade
