@@ -22,7 +22,8 @@ fn preset(name: &str) -> Option<&'static [&'static str]> {
             // sigstore trust root, for GitHub release attestation checks
             "tuf-repo-cdn.sigstore.dev",
         ],
-        "opencode" => &["models.dev"],
+        // opencode.ai serves release downloads since 2.x.
+        "opencode" => &["models.dev", "opencode.ai"],
         "npm" => &["registry.npmjs.org"],
         "pypi" => &["pypi.org", "files.pythonhosted.org"],
         "cargo" => &["crates.io", "index.crates.io", "static.crates.io", "static.rust-lang.org"],

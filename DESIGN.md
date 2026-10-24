@@ -94,7 +94,8 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
   at create time, so changing it needs `rebuild`. The `mise` preset includes
   `storage.googleapis.com` (Claude Code downloads) and
   `tuf-repo-cdn.sigstore.dev` (attestation checks for GitHub releases, e.g.
-  gh). The `opencode` preset allows `models.dev`. Exact preset host lists are
+  gh). The `opencode` preset allows `models.dev` and `opencode.ai` (release
+  downloads since 2.x). Exact preset host lists are
   found empirically: deny-all, run the install, read the deny log.
 - **Deny log:** microsandbox logs denials at debug level in the per-VM
   runtime log, which rotates every 10 MB (four files). Debug output is mostly
