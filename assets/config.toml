@@ -18,6 +18,14 @@ herdr = "latest"
 "aqua:anomalyco/opencode" = "latest"
 gh = "latest"
 
+# Copy the host's herdr config (~/.config/herdr/config.toml) into every VM.
+# Agents can read the copy: keep secrets and private paths out of it.
+# Rewritten on each VM start (in-VM edits are lost); host edits apply after
+# a restart. If the VM's herdr version rejects it, pin [tools] herdr to the
+# host's version.
+[herdr]
+copy_config = false
+
 [network]
 # Deny by default. Entries: "host", "*.suffix" or "preset:<name>".
 # Presets: llm, github, mise, opencode, npm, pypi, cargo, go, node.

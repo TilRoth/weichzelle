@@ -26,6 +26,16 @@ pub struct Config {
     /// Keyed by the environment variable name the guest sees.
     #[serde(default)]
     pub secrets: BTreeMap<String, SecretConfig>,
+    #[serde(default)]
+    pub herdr: HerdrConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HerdrConfig {
+    /// Copy the host's herdr config.toml into every VM on start.
+    #[serde(default)]
+    pub copy_config: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -155,4 +165,35 @@ pub fn init() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BASE: &str = "[git]\nname = \"a\"\nemail = \"a@b.c\"\n";
+
+    #[test]
+    fn herdr_copy_is_off_by_default() {
+        let c: Config = toml::from_str(BASE).unwrap();
+        assert!(!c.herdr.copy_config);
+    }
+
+    #[test]
+    fn herdr_copy_can_be_enabled() {
+        let c: Config = toml::from_str(&format!("{BASE}[herdr]\ncopy_config = true\n")).unwrap();
+        assert!(c.herdr.copy_config);
+    }
+
+    #[test]
+    fn herdr_rejects_unknown_keys() {
+        assert!(toml::from_str::<Config>(&format!("{BASE}[herdr]\npath = \"x\"\n")).is_err());
+    }
+
+    #[test]
+    fn default_config_parses() {
+        let c: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
+        c.validate().unwrap();
+        assert!(!c.herdr.copy_config);
+    }
 }

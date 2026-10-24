@@ -1,6 +1,7 @@
 #!/bin/bash
 # Runs inside the VM as `agent` on every start. Must be idempotent.
-# Inputs (env): WZ_MISE_CONFIG, WZ_REPO_URL, WZ_REPO_DIR, WZ_GIT_NAME, WZ_GIT_EMAIL
+# Inputs (env): WZ_MISE_CONFIG, WZ_REPO_URL, WZ_REPO_DIR, WZ_GIT_NAME, WZ_GIT_EMAIL,
+# WZ_HERDR_CONFIG (only set when herdr.copy_config is on)
 set -euo pipefail
 
 log() { printf '\033[1m[weichzelle]\033[0m %s\n' "$*"; }
@@ -19,6 +20,12 @@ if [ -n "${GH_TOKEN:-}" ]; then
   # GH_TOKEN is a placeholder; the host swaps in the real token for github.com.
   git config --global --replace-all credential.https://github.com.helper \
     '!f() { test "$1" = get && echo username=x-access-token && echo "password=$GH_TOKEN"; }; f'
+fi
+
+# Host herdr config, rewritten each start. Left alone when copying is off.
+if [ -n "${WZ_HERDR_CONFIG+x}" ]; then
+  mkdir -p ~/.config/herdr
+  printf '%s' "$WZ_HERDR_CONFIG" > ~/.config/herdr/config.toml
 fi
 
 if [ ! -d "$WZ_REPO_DIR/.git" ]; then

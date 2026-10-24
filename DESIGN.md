@@ -28,9 +28,9 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
 
 ## Inside the VM
 
-- **One global Containerfile:** Debian trixie with OS packages, git, jq and
-  mise. Built with podman (or buildah or docker) and imported into
-  microsandbox. The image tag is a hash of the Containerfile, so editing it
+- **One global Containerfile:** Ubuntu 26.04 LTS (matches the host and
+  GitHub's `ubuntu-latest`) with OS packages, git, jq and mise. Built with
+  podman (or buildah or docker) and imported into microsandbox. The image tag is a hash of the Containerfile, so editing it
   triggers a new build on the next `create` or `rebuild`.
 - **Non-root user:** agents run as `agent` (uid 1000) with passwordless sudo.
   Claude Code refuses bypass mode as root. sudo gives nothing extra, because
@@ -45,6 +45,11 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
 - **herdr** coordinates agents. Agents can see and drive each other via the
   herdr socket. The whole VM is one trust zone. The socket is never exposed
   outside the VM.
+- **herdr config:** opt-in (`[herdr] copy_config`). weichzelle reads the
+  host's `~/.config/herdr/config.toml` before starting the VM (missing file =
+  error) and provisioning writes it into the VM on every start. The host copy
+  wins, and edits apply after a restart. Turning it off leaves an existing copy
+  in place until `rebuild`.
 - **Harness profiles:** pre-written harness config that skips first-run and
   trust dialogs. Permission flags (e.g. `--auto`) are chosen when starting an
   agent. Adding a harness = a mise entry plus a profile. Claude Code's profile
@@ -104,6 +109,7 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
 ```
 weichzelle create <github-url> [--name N]   # clone into a new VM
 weichzelle attach <name>                     # start if stopped, open herdr
+weichzelle shell <name>                      # start if stopped, open bash
 weichzelle stop | start <name>
 weichzelle rebuild <name> [--force]          # wipe and recreate
 weichzelle destroy <name> [--force]
@@ -124,6 +130,8 @@ weichzelle secret set|delete <name>          # keyring values
 - Allowing `storage.googleapis.com` opens an anonymous exfiltration channel
   (any publicly writable GCS bucket).
 - Agent PRs appear as the user's own (GitHub forbids self-approval).
+- With `herdr.copy_config` on, the agent can read the host herdr config
+  (custom commands, paths in it).
 
 ## Fact-check results (microsandbox v0.7.x, 2026-10-18)
 

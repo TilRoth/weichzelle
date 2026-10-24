@@ -1,6 +1,6 @@
 # weichzelle global base image. Built on the host; changes need `weichzelle rebuild`.
 # Harnesses and herdr come from mise (config.toml [tools]), not from here.
-FROM debian:trixie-slim
+FROM ubuntu:26.04
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -14,7 +14,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Agents run as a normal user (Claude Code refuses bypass mode as root).
-RUN useradd -m -s /bin/bash -u 1000 agent \
+RUN userdel -r ubuntu && useradd -m -s /bin/bash -u 1000 agent \
  && echo 'agent ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agent \
  && mkdir -p /work && chown agent:agent /work \
  && echo 'eval "$(mise activate bash)"' >> /home/agent/.bashrc

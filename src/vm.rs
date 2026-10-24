@@ -130,15 +130,37 @@ async fn shell_as_agent(sb: &Sandbox, script: &str, envs: &[(&str, String)]) -> 
     .context("exec in VM failed")
 }
 
+/// The host's herdr config, if `herdr.copy_config` is on. Read before the VM
+/// starts so a missing file fails early.
+fn host_herdr_config(config: &Config) -> Result<Option<String>> {
+    if !config.herdr.copy_config {
+        return Ok(None);
+    }
+    let path = dirs::config_dir().context("no config directory")?.join("herdr/config.toml");
+    let text = std::fs::read_to_string(&path).with_context(|| {
+        format!("cannot read herdr config {} (herdr.copy_config is on)", path.display())
+    })?;
+    Ok(Some(text))
+}
+
 /// Install tools, clone the repo (first time) and write harness profiles.
-async fn provision(config: &Config, sb: &Sandbox, name: &str, repo_url: &str) -> Result<()> {
-    let envs = [
+async fn provision(
+    config: &Config,
+    sb: &Sandbox,
+    name: &str,
+    repo_url: &str,
+    herdr_config: Option<String>,
+) -> Result<()> {
+    let mut envs = vec![
         ("WZ_MISE_CONFIG", mise_config(config)),
         ("WZ_REPO_URL", repo_url.to_string()),
         ("WZ_REPO_DIR", repo_dir(name)),
         ("WZ_GIT_NAME", config.git.name.clone()),
         ("WZ_GIT_EMAIL", config.git.email.clone()),
     ];
+    if let Some(text) = herdr_config {
+        envs.push(("WZ_HERDR_CONFIG", text));
+    }
     // Stream output as it arrives so long installs show progress. Plain
     // exec (not attach) also works when the host has no terminal.
     let mut exec = sb
@@ -190,10 +212,11 @@ async fn running(config: &Config, name: &str) -> Result<Sandbox> {
     if h.status_snapshot() == SandboxStatus::Running {
         return h.connect().await.context("cannot connect to the VM");
     }
+    let herdr_config = host_herdr_config(config)?;
     println!("starting {name}…");
     let repo = repo_label(&h)?;
     let sb = h.start_detached().await.context("cannot start the VM")?;
-    provision(config, &sb, name, &repo).await?;
+    provision(config, &sb, name, &repo, herdr_config).await?;
     Ok(sb)
 }
 
@@ -206,9 +229,10 @@ pub async fn create(config: &Config, url: &str, name: Option<String>) -> Result<
     if Sandbox::get(&vm_name(&name)).await.is_ok() {
         bail!("sandbox `{name}` already exists");
     }
+    let herdr_config = host_herdr_config(config)?;
     println!("creating {name} for {url}…");
     let sb = create_vm(config, &name, &url).await?;
-    provision(config, &sb, &name, &url).await?;
+    provision(config, &sb, &name, &url, herdr_config).await?;
     sb.detach().await;
     println!("created {name}. attach with: weichzelle attach {name}");
     Ok(())
@@ -220,17 +244,29 @@ pub async fn start(config: &Config, name: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn attach(config: &Config, name: &str) -> Result<()> {
+/// Run an interactive command in the repo dir with a TTY. Returns its exit code.
+async fn attach_cmd(config: &Config, name: &str, cmd: &str) -> Result<i32> {
     let sb = running(config, name).await?;
     let dir = repo_dir(name);
     let code = sb
-        .attach_with("herdr", |a| a.user(GUEST_USER).cwd(dir.as_str()).env("SHELL", "/bin/bash"))
+        .attach_with(cmd, |a| a.user(GUEST_USER).cwd(dir.as_str()).env("SHELL", "/bin/bash"))
         .await
         .context("cannot attach")?;
     sb.detach().await;
+    Ok(code)
+}
+
+pub async fn attach(config: &Config, name: &str) -> Result<()> {
+    let code = attach_cmd(config, name, "herdr").await?;
     if code != 0 {
         bail!("herdr exited with {code}");
     }
+    Ok(())
+}
+
+/// A plain bash shell. Its exit code is the last command's, so it's ignored.
+pub async fn shell(config: &Config, name: &str) -> Result<()> {
+    attach_cmd(config, name, "bash").await?;
     Ok(())
 }
 

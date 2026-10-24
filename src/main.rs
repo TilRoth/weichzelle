@@ -28,6 +28,8 @@ enum Cmd {
     },
     /// Open herdr in the VM (starts it if stopped).
     Attach { name: String },
+    /// Open a bash shell in the VM (starts it if stopped).
+    Shell { name: String },
     /// Start a stopped VM.
     Start { name: String },
     /// Stop a running VM. Its disk is kept.
@@ -86,7 +88,7 @@ fn main() -> Result<()> {
     // and that must happen before the async runtime spawns threads.
     let boots_vm = matches!(
         cli.command,
-        Cmd::Create { .. } | Cmd::Attach { .. } | Cmd::Start { .. } | Cmd::Rebuild { .. } | Cmd::Destroy { force: false, .. }
+        Cmd::Create { .. } | Cmd::Attach { .. } | Cmd::Shell { .. } | Cmd::Start { .. } | Cmd::Rebuild { .. } | Cmd::Destroy { force: false, .. }
     );
     if boots_vm {
         secrets::export_all(&config.secrets)?;
@@ -97,6 +99,7 @@ fn main() -> Result<()> {
         match cli.command {
             Cmd::Create { url, name } => vm::create(&config, &url, name).await,
             Cmd::Attach { name } => vm::attach(&config, &name).await,
+            Cmd::Shell { name } => vm::shell(&config, &name).await,
             Cmd::Start { name } => vm::start(&config, &name).await,
             Cmd::Stop { name } => vm::stop(&name).await,
             Cmd::Rebuild { name, force } => vm::rebuild(&config, &name, force).await,
