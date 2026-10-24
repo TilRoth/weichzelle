@@ -29,6 +29,16 @@ fn preset(name: &str) -> Option<&'static [&'static str]> {
         "cargo" => &["crates.io", "index.crates.io", "static.crates.io", "static.rust-lang.org"],
         "go" => &["proxy.golang.org", "sum.golang.org", "go.dev", "dl.google.com"],
         "node" => &["nodejs.org"],
+        // Container registries. Any of them accepts pushes from an account
+        // the agent logs into (accepted risk, see DESIGN.md).
+        "dockerhub" => &[
+            "registry-1.docker.io",
+            "auth.docker.io",
+            "production.cloudflare.docker.com",
+            "production.cloudfront.docker.com",
+        ],
+        "ghcr" => &["ghcr.io", "pkg-containers.githubusercontent.com"],
+        "mcr" => &["mcr.microsoft.com", "*.data.mcr.microsoft.com"],
         _ => return None,
     })
 }

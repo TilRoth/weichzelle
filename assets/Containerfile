@@ -6,6 +6,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates curl git gnupg jq less procps sudo unzip xz-utils \
       build-essential openssh-client locales \
+      docker.io docker-buildx docker-compose-v2 \
  && install -dm 755 /etc/apt/keyrings \
  && curl -fsSL https://mise.jdx.dev/gpg-key.pub | gpg --dearmor -o /etc/apt/keyrings/mise.gpg \
  && echo "deb [signed-by=/etc/apt/keyrings/mise.gpg] https://mise.jdx.dev/deb stable main" \
@@ -14,7 +15,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Agents run as a normal user (Claude Code refuses bypass mode as root).
-RUN userdel -r ubuntu && useradd -m -s /bin/bash -u 1000 agent \
+RUN userdel -r ubuntu && useradd -m -s /bin/bash -u 1000 -G docker agent \
  && echo 'agent ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agent \
  && mkdir -p /work && chown agent:agent /work \
  && echo 'eval "$(mise activate bash)"' >> /home/agent/.bashrc

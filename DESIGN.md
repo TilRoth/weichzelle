@@ -61,6 +61,26 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
   the git identity and a credential helper that answers with the `GH_TOKEN`
   placeholder, clones the repo on the first run, installs the repo's mise
   toolchain (a failure only warns), and writes the harness profiles.
+- **Docker:** Ubuntu's `docker.io` with buildx and compose, in every VM.
+  `agent` is in the `docker` group (no more than its sudo). There is no init
+  system, so provisioning starts `dockerd` on every boot (log:
+  `/var/log/dockerd.log`; a failure only warns). `/var/lib/docker` is a
+  private sparse ext4 disk (`vm.docker_disk_gib`, default 40), because
+  overlay2 can't sit on the overlayfs root. Docker's default networks
+  (172.17+, 192.168.x) stay clear of microsandbox's guest addresses
+  (172.16.0.x).
+- **CA in containers:** images bring their own CA bundle, which lacks the
+  interception CA, so HTTPS from containers would fail. Bypassing
+  interception isn't possible: in strict mode (default) microsandbox denies
+  bypassed connections allowed only by hostname, since an unverified SNI can
+  be faked. Instead `assets/wz-runc` replaces `/usr/sbin/runc` (the real one
+  is diverted to `runc.real` with `dpkg-divert`). On container create it
+  bind-mounts the VM's bundle read-only over the CA files the image has
+  (distro paths and files the image's own CA env vars name) and sets
+  `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`,
+  `CURL_CA_BUNDLE` where the image doesn't. Replacing runc itself covers
+  BuildKit steps, which ignore dockerd's runtime settings. It never creates
+  paths: runc would leave empty mount stubs in images built in the VM.
 - **Environment:** `SHELL=/bin/bash` (herdr panes otherwise get `/bin/sh`,
   with no line editing), `NODE_EXTRA_CA_CERTS` pointing at the interception
   CA, and update checks turned off.
@@ -103,7 +123,10 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
   `weichzelle logs <name> --egress` sums up denials per target. Known
   denials, left blocked: `herdr.dev` (herdr) and `downloads.claude.ai`
   (Claude Code).
-- **Resources:** fixed vCPU and memory per VM; defaults in the config.
+- **Registries:** presets `dockerhub`, `ghcr`, `mcr`, on by default. Docker
+  Hub serves blobs from both Cloudflare and CloudFront hosts.
+- **Resources:** fixed vCPU, memory and Docker disk per VM; defaults in the
+  config. The disk size is fixed at create.
 
 ## CLI (v1)
 
@@ -130,6 +153,12 @@ weichzelle secret set|delete <name>          # keyring values
   gets **the real secrets and the user's privileges**.
 - Allowing `storage.googleapis.com` opens an anonymous exfiltration channel
   (any publicly writable GCS bucket).
+- Container registries accept pushes from any account the agent logs into,
+  so they can carry data out.
+- Java in containers doesn't trust the interception CA (own keystore). Images
+  that only read a CA path the wrapper doesn't know fail too.
+- An agent can bypass the CA wrapper (root via sudo). It only breaks its own
+  HTTPS.
 - Agent PRs appear as the user's own (GitHub forbids self-approval).
 - With `herdr.copy_config` on, the agent can read the host herdr config
   (custom commands, paths in it).
@@ -150,6 +179,13 @@ weichzelle secret set|delete <name>          # keyring values
    `raw.githubusercontent.com`), `mise-versions.jdx.dev`,
    `storage.googleapis.com`, plus per-language hosts (`nodejs.org`, …).
    Exact list found empirically.
+6. **Docker (2026-10-24, Ubuntu 26.04, Docker 29.1):** guest kernel 6.12 has
+   everything built in (cgroup v2, overlay, netfilter, bridge, netns). Root is
+   overlayfs; PID 1 is `/init.krun`. Docker uses the containerd image store,
+   and BuildKit steps don't go through dockerd's `default-runtime`. Guest
+   IPv4 addresses come from 172.16.0.0/12, lowest free /30 first
+   (`runtime/network_slot.rs`); recheck on upgrades that Docker's ranges
+   stay clear.
 
 ## Future work
 

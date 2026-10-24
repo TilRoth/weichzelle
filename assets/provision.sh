@@ -1,6 +1,7 @@
 #!/bin/bash
 # Runs inside the VM as `agent` on every start. Must be idempotent.
 # Inputs (env): WZ_MISE_CONFIG, WZ_REPO_URL, WZ_REPO_DIR, WZ_GIT_NAME, WZ_GIT_EMAIL,
+# WZ_RUNC (assets/wz-runc),
 # WZ_HERDR_CONFIG (only set when herdr.copy_config is on)
 set -euo pipefail
 
@@ -27,6 +28,36 @@ if [ -n "${WZ_HERDR_CONFIG+x}" ]; then
   mkdir -p ~/.config/herdr
   printf '%s' "$WZ_HERDR_CONFIG" > ~/.config/herdr/config.toml
 fi
+
+# Docker. No init system in the VM, so dockerd is started here on every boot.
+# Failures only warn: the VM stays usable without Docker.
+setup_docker() {
+  if ! command -v dockerd >/dev/null; then
+    log "docker is not in the image; skipping (see the default Containerfile)"
+    return 0
+  fi
+  # CA wrapper (assets/wz-runc) in place of runc, so BuildKit steps get it
+  # too (they don't use dockerd's runtime settings). Takes effect for the
+  # next container; no daemon restart needed.
+  if [ ! -e /usr/sbin/runc.real ]; then
+    sudo dpkg-divert --quiet --local --rename --divert /usr/sbin/runc.real --add /usr/sbin/runc \
+      || return 1
+  fi
+  if ! printf '%s' "$WZ_RUNC" | sudo cmp -s - /usr/sbin/runc; then
+    printf '%s' "$WZ_RUNC" | sudo tee /usr/sbin/runc >/dev/null && sudo chmod 755 /usr/sbin/runc \
+      || return 1
+  fi
+  if ! sudo docker info >/dev/null 2>&1; then
+    log "starting dockerd"
+    # A pid file left over from the last boot blocks the start.
+    pgrep -x dockerd >/dev/null || sudo rm -f /var/run/docker.pid
+    sudo sh -c 'setsid dockerd >>/var/log/dockerd.log 2>&1 </dev/null &'
+    for _ in $(seq 40); do sudo docker info >/dev/null 2>&1 && break; sleep 0.5; done
+    sudo docker info >/dev/null 2>&1 || return 1
+  fi
+  docker info >/dev/null 2>&1 || log "warning: dockerd runs, but agent can't reach its socket"
+}
+setup_docker || log "warning: docker setup failed (see /var/log/dockerd.log in the VM)"
 
 if [ ! -d "$WZ_REPO_DIR/.git" ]; then
   log "cloning $WZ_REPO_URL"

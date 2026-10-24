@@ -13,6 +13,7 @@ const PREFIX: &str = "wz-";
 const LABEL_REPO: &str = "weichzelle.repo";
 const GUEST_USER: &str = "agent";
 const PROVISION: &str = include_str!("../assets/provision.sh");
+const WZ_RUNC: &str = include_str!("../assets/wz-runc");
 
 pub fn vm_name(name: &str) -> String {
     format!("{PREFIX}{name}")
@@ -88,6 +89,10 @@ async fn create_vm(config: &Config, name: &str, repo_url: &str) -> Result<Sandbo
         .log_level(LogLevel::Debug)
         .detached(true)
         .network(|n| n.policy(policy))
+        // Docker's overlay2 can't sit on the overlayfs root; give it its own ext4 disk.
+        .volume("/var/lib/docker", |m| {
+            m.owned_with(|v| v.disk().size(config.vm.docker_disk_gib * 1024))
+        })
         // Hostname rules need TLS interception to see the real request target.
         .intercept_tls()
         .env("PATH", "/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
@@ -157,6 +162,7 @@ async fn provision(
         ("WZ_REPO_DIR", repo_dir(name)),
         ("WZ_GIT_NAME", config.git.name.clone()),
         ("WZ_GIT_EMAIL", config.git.email.clone()),
+        ("WZ_RUNC", WZ_RUNC.to_string()),
     ];
     if let Some(text) = herdr_config {
         envs.push(("WZ_HERDR_CONFIG", text));

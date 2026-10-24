@@ -1,0 +1,60 @@
+#!/bin/bash
+# Installed over /usr/sbin/runc (the real one is diverted to runc.real), so
+# every container goes through it: docker run, compose and BuildKit steps.
+# Images bring their own CA bundle, which lacks microsandbox's TLS
+# interception CA, so HTTPS from containers would fail. On create/run, mount
+# the VM's bundle over the image's CA files and point the usual CA env vars
+# at it. Only paths the image already has are used: creating new ones would
+# leave empty stubs in images built here.
+REAL=/usr/sbin/runc.real
+CA=/etc/ssl/certs/ca-certificates.crt
+PATHS=(/etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem)
+VARS=(SSL_CERT_FILE NODE_EXTRA_CA_CERTS REQUESTS_CA_BUNDLE CURL_CA_BUNDLE)
+
+cmd="" bundle=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  a=${args[i]}
+  if [ -z "$cmd" ]; then
+    case $a in
+      --root | --log | --log-format | --criu | --rootless) i=$((i + 1)) ;; # global flags with a value
+      -*) ;;
+      *) cmd=$a ;;
+    esac
+  else
+    case $a in
+      --bundle | -b) bundle=${args[i + 1]:-} ;;
+      --bundle=*) bundle=${a#--bundle=} ;;
+    esac
+  fi
+done
+
+inject() {
+  local dir=${bundle:-$PWD} cfg rootfs p targets=()
+  cfg=$dir/config.json
+  [ -f "$cfg" ] && [ -f "$CA" ] || return 0
+  rootfs=$(jq -r '.root.path // "rootfs"' "$cfg") || return 1
+  [[ $rootfs == /* ]] || rootfs=$dir/$rootfs
+  # Distro paths plus files the image's own CA vars point to.
+  while IFS= read -r p; do
+    [[ $p == /* ]] || continue
+    if [ -f "$rootfs$p" ] || [ -L "$rootfs$p" ]; then targets+=("$p"); fi
+  done < <(printf '%s\n' "${PATHS[@]}"
+           jq -r --args '(.process.env // [])[] | select(startswith($ARGS.positional[] + "=")) | sub("^[^=]*="; "")' \
+             "${VARS[@]}" < "$cfg")
+  [ ${#targets[@]} -gt 0 ] || return 0
+  jq --arg ca "$CA" --argjson vars "$(printf '%s\n' "${VARS[@]}" | jq -R . | jq -s .)" --args '
+      ($ARGS.positional | unique) as $t
+    | .mounts = ((.mounts // []) + ($t | map({destination: ., type: "bind", source: $ca, options: ["rbind", "ro"]})))
+    | if .process then
+        .process.env = ((.process.env // []) as $env
+          | $env + ($vars | map(select(. as $k | $env | any(startswith($k + "=")) | not))
+                          | map(. + "=" + $ARGS.positional[0])))
+      else . end
+  ' "${targets[@]}" < "$cfg" > "$cfg.wz" && mv "$cfg.wz" "$cfg"
+}
+
+if [ "$cmd" = create ] || [ "$cmd" = run ]; then
+  inject || echo "wz-runc: CA injection failed, starting without it" >&2
+fi
+exec "$REAL" "$@"

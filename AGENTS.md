@@ -18,8 +18,9 @@ behaviour changes.
 - `src/secrets.rs`: keyring/env secret sources.
 - `src/logs.rs`: egress denials from the microsandbox runtime log.
 - `assets/`: compiled into the binary: the default `config.toml` and
-  `Containerfile` (written by `weichzelle init`) and `provision.sh` (run in the
-  VM on every start).
+  `Containerfile` (written by `weichzelle init`), `provision.sh` (run in the
+  VM on every start) and `wz-runc` (installed over runc in the VM; gives
+  containers the interception CA).
 
 ## Commands
 

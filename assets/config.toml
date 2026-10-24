@@ -4,6 +4,9 @@
 [vm]
 cpus = 4
 memory_mib = 4096
+# Private Docker data disk (/var/lib/docker), sparse: uses host space only as
+# it fills. Fixed when a VM is created; changing it needs `rebuild`.
+docker_disk_gib = 40
 
 # Identity for commits made inside the VMs.
 [git]
@@ -28,8 +31,12 @@ copy_config = false
 
 [network]
 # Deny by default. Entries: "host", "*.suffix" or "preset:<name>".
-# Presets: llm, github, mise, opencode, npm, pypi, cargo, go, node.
-allow = ["preset:llm", "preset:github", "preset:mise", "preset:opencode"]
+# Presets: llm, github, mise, opencode, npm, pypi, cargo, go, node,
+# dockerhub, ghcr, mcr (container registries).
+allow = [
+  "preset:llm", "preset:github", "preset:mise", "preset:opencode",
+  "preset:dockerhub", "preset:ghcr", "preset:mcr",
+]
 
 # Secrets: the VM only sees a placeholder. The real value is substituted
 # only in the listed headers, only on requests to the listed hosts.

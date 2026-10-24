@@ -45,11 +45,14 @@ pub struct VmConfig {
     pub cpus: u8,
     #[serde(default = "default_memory")]
     pub memory_mib: u32,
+    /// Size of the private Docker data disk (sparse). Fixed at create.
+    #[serde(default = "default_docker_disk")]
+    pub docker_disk_gib: u32,
 }
 
 impl Default for VmConfig {
     fn default() -> Self {
-        Self { cpus: default_cpus(), memory_mib: default_memory() }
+        Self { cpus: default_cpus(), memory_mib: default_memory(), docker_disk_gib: default_docker_disk() }
     }
 }
 
@@ -58,6 +61,9 @@ fn default_cpus() -> u8 {
 }
 fn default_memory() -> u32 {
     4096
+}
+fn default_docker_disk() -> u32 {
+    40
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,6 +129,9 @@ impl Config {
     fn validate(&self) -> Result<()> {
         if self.vm.cpus == 0 || self.vm.memory_mib < 512 {
             bail!("vm.cpus must be >= 1 and vm.memory_mib >= 512");
+        }
+        if !(1..=4096).contains(&self.vm.docker_disk_gib) {
+            bail!("vm.docker_disk_gib must be between 1 and 4096");
         }
         for (env, secret) in &self.secrets {
             let valid_env = !env.is_empty()
@@ -195,5 +204,14 @@ mod tests {
         let c: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
         c.validate().unwrap();
         assert!(!c.herdr.copy_config);
+        assert_eq!(c.vm.docker_disk_gib, 40);
+    }
+
+    #[test]
+    fn docker_disk_defaults_and_validates() {
+        let c: Config = toml::from_str(BASE).unwrap();
+        assert_eq!(c.vm.docker_disk_gib, 40);
+        let c: Config = toml::from_str(&format!("{BASE}[vm]\ndocker_disk_gib = 0\n")).unwrap();
+        assert!(c.validate().is_err());
     }
 }
