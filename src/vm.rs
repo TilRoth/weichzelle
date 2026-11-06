@@ -28,8 +28,7 @@ fn repo_dir(name: &str) -> String {
 pub fn name_from_url(url: &str) -> Result<String> {
     let last = url.trim_end_matches('/').rsplit(['/', ':']).next().unwrap_or_default();
     let name = last.trim_end_matches(".git");
-    let valid = !name.is_empty()
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+    let valid = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
     if !valid {
         bail!("cannot derive a name from `{url}`; pass --name");
     }
@@ -85,12 +84,15 @@ async fn create_vm(config: &Config, name: &str, repo_url: &str) -> Result<Sandbo
         .detached(true)
         .network(|n| n.policy(policy))
         // Docker's overlay2 can't sit on the overlayfs root; give it its own ext4 disk.
-        .volume("/var/lib/docker", |m| {
-            m.owned_with(|v| v.disk().size(config.vm.docker_disk_gib * 1024))
-        })
+        .volume("/var/lib/docker", |m| m.owned_with(|v| v.disk().size(config.vm.docker_disk_gib * 1024)))
         // Hostname rules need TLS interception to see the real request target.
         .intercept_tls()
-        .env("PATH", format!("{GUEST_HOME}/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"))
+        .env(
+            "PATH",
+            format!(
+                "{GUEST_HOME}/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ),
+        )
         .env("LANG", "C.UTF-8")
         // herdr panes start $SHELL; without it they get /bin/sh (no line editing).
         .env("SHELL", "/bin/bash")
@@ -128,9 +130,8 @@ fn host_herdr_config(config: &Config) -> Result<Option<String>> {
         return Ok(None);
     }
     let path = dirs::config_dir().context("no config directory")?.join("herdr/config.toml");
-    let text = std::fs::read_to_string(&path).with_context(|| {
-        format!("cannot read herdr config {} (herdr.copy_config is on)", path.display())
-    })?;
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("cannot read herdr config {} (herdr.copy_config is on)", path.display()))?;
     Ok(Some(text))
 }
 
@@ -182,9 +183,7 @@ async fn provision(
 }
 
 async fn handle(name: &str) -> Result<SandboxHandle> {
-    Sandbox::get(&vm_name(name))
-        .await
-        .with_context(|| format!("no sandbox named `{name}` (see `weichzelle list`)"))
+    Sandbox::get(&vm_name(name)).await.with_context(|| format!("no sandbox named `{name}` (see `weichzelle list`)"))
 }
 
 fn repo_label(h: &SandboxHandle) -> Result<String> {
@@ -203,7 +202,7 @@ fn repo_label(h: &SandboxHandle) -> Result<String> {
 async fn running(config: &Config, name: &str) -> Result<Sandbox> {
     let h = handle(name).await?;
     if h.status_snapshot() == SandboxStatus::Running {
-        let drift = reconcile::drift(config, &h)?;
+        let drift = reconcile::drift(config, &h.config()?)?;
         if !drift.is_empty() {
             eprintln!(
                 "note: {} in config.toml changed since {name} started. \

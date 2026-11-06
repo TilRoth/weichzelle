@@ -15,18 +15,15 @@ use crate::config;
 /// Image reference for the current Containerfile.
 pub fn reference() -> Result<String> {
     let path = config::containerfile_path()?;
-    let content = std::fs::read(&path)
-        .with_context(|| format!("cannot read {} (run `weichzelle init`)", path.display()))?;
+    let content =
+        std::fs::read(&path).with_context(|| format!("cannot read {} (run `weichzelle init`)", path.display()))?;
     let hash = hex::encode(Sha256::digest(&content));
     Ok(format!("localhost/weichzelle-base:{}", &hash[..12]))
 }
 
 fn builder() -> Result<&'static str> {
     for tool in ["podman", "buildah", "docker"] {
-        let found = Command::new(tool)
-            .arg("--version")
-            .output()
-            .is_ok_and(|o| o.status.success());
+        let found = Command::new(tool).arg("--version").output().is_ok_and(|o| o.status.success());
         if found {
             return Ok(tool);
         }
@@ -72,9 +69,7 @@ pub async fn ensure() -> Result<String> {
     };
     run(&mut save)?;
 
-    Image::load(&archive, vec![reference.clone()])
-        .await
-        .context("cannot import the image into microsandbox")?;
+    Image::load(&archive, vec![reference.clone()]).await.context("cannot import the image into microsandbox")?;
     let _ = std::fs::remove_file(&archive);
     Ok(reference)
 }

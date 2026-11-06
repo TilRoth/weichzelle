@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use microsandbox::sandbox::{SandboxConfig, SandboxHandle, SecretBuilder};
+use microsandbox::sandbox::{SandboxConfig, SecretBuilder};
 use microsandbox::{NetworkPolicy, Sandbox, SecretSource};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -82,8 +82,8 @@ fn as_saved<T: DeserializeOwned + Serialize>(_like: &[T], value: &impl Serialize
     Ok(serde_json::to_value(saved)?)
 }
 
-pub fn drift(config: &Config, h: &SandboxHandle) -> Result<Drift> {
-    let saved = h.config()?;
+/// Compare a VM's saved config with the host config.
+pub fn drift(config: &Config, saved: &SandboxConfig) -> Result<Drift> {
     let mut drift = Drift::default();
 
     let mut wanted = saved.clone();
@@ -111,7 +111,7 @@ pub fn drift(config: &Config, h: &SandboxHandle) -> Result<Drift> {
 /// Apply the host config to a stopped VM, so its next start uses it.
 pub async fn apply(config: &Config, vm: &str) -> Result<()> {
     let h = Sandbox::get(vm).await?;
-    let drift = drift(config, &h)?;
+    let drift = drift(config, &h.config()?)?;
     if drift.is_empty() {
         return Ok(());
     }
@@ -143,7 +143,7 @@ pub async fn apply(config: &Config, vm: &str) -> Result<()> {
     }
 
     // Both paths write what `drift` compares against, so nothing may be left.
-    let left = self::drift(config, &Sandbox::get(vm).await?)?;
+    let left = self::drift(config, &Sandbox::get(vm).await?.config()?)?;
     if !left.is_empty() {
         bail!(
             "{vm}: {} still differ from config.toml after updating. \
@@ -154,54 +154,273 @@ pub async fn apply(config: &Config, vm: &str) -> Result<()> {
     Ok(())
 }
 
+fn format_error(vm: &str) -> String {
+    format!(
+        "unexpected saved config for {vm}: weichzelle edits microsandbox 0.7.8's format only. \
+         Rebuild the VM to change its network policy"
+    )
+}
+
 /// Replace the network policy in a stopped VM's saved config.
 async fn write_policy(vm: &str, policy: &Value) -> Result<()> {
-    let format_error = || {
-        format!(
-            "unexpected saved config for {vm}: weichzelle edits microsandbox 0.7.8's format only. \
-             Rebuild the VM to change its network policy"
-        )
-    };
     let path = microsandbox::config::config()?.home().join("db").join("msb.db");
     let options = SqliteConnectOptions::new().filename(&path).busy_timeout(Duration::from_secs(10));
-    let mut db = SqliteConnection::connect_with(&options)
-        .await
-        .with_context(|| format!("cannot open {}", path.display()))?;
-
-    let (old, status): (String, String) =
-        sqlx::query_as("SELECT config, status FROM sandbox WHERE name = ?")
-            .bind(vm)
-            .fetch_optional(&mut db)
-            .await?
-            .with_context(|| format!("no sandbox `{vm}` in {}", path.display()))?;
+    let mut db =
+        SqliteConnection::connect_with(&options).await.with_context(|| format!("cannot open {}", path.display()))?;
+    let (old, status) =
+        read_row(&mut db, vm).await?.with_context(|| format!("no sandbox `{vm}` in {}", path.display()))?;
     if !STOPPED.contains(&status.as_str()) {
         bail!("{vm} is {status}; it must be stopped to change its network policy");
     }
+    let new = with_policy(vm, &old, policy)?;
+    update_row(&mut db, vm, &old, &status, &new).await?;
+    db.close().await?;
+    Ok(())
+}
 
-    let mut config: Value = serde_json::from_str(&old).with_context(format_error)?;
+/// A sandbox's saved config and status.
+async fn read_row(db: &mut SqliteConnection, vm: &str) -> Result<Option<(String, String)>> {
+    Ok(sqlx::query_as("SELECT config, status FROM sandbox WHERE name = ?").bind(vm).fetch_optional(db).await?)
+}
+
+/// The saved config `old` with its network policy replaced by `policy`.
+fn with_policy(vm: &str, old: &str, policy: &Value) -> Result<String> {
+    let mut config: Value = serde_json::from_str(old).with_context(|| format_error(vm))?;
     let slot = config
         .get_mut("network")
         .and_then(|n| n.get_mut("policy"))
         .filter(|p| p.is_object())
-        .with_context(format_error)?;
+        .with_context(|| format_error(vm))?;
     *slot = policy.clone();
     // The result must still be a valid config holding exactly the new policy.
-    let parsed: SandboxConfig = serde_json::from_value(config.clone()).with_context(format_error)?;
+    let parsed: SandboxConfig = serde_json::from_value(config.clone()).with_context(|| format_error(vm))?;
     if serde_json::to_value(&parsed.spec.network.policy)? != *policy {
-        bail!(format_error());
+        bail!(format_error(vm));
     }
+    Ok(serde_json::to_string(&config)?)
+}
 
-    // Only if nothing changed the row since it was read.
+/// Write `new`, but only if nothing changed the row since it was read.
+async fn update_row(db: &mut SqliteConnection, vm: &str, old: &str, status: &str, new: &str) -> Result<()> {
     let done = sqlx::query("UPDATE sandbox SET config = ? WHERE name = ? AND config = ? AND status = ?")
-        .bind(serde_json::to_string(&config)?)
+        .bind(new)
         .bind(vm)
-        .bind(&old)
-        .bind(&status)
-        .execute(&mut db)
+        .bind(old)
+        .bind(status)
+        .execute(db)
         .await?;
     if done.rows_affected() != 1 {
         bail!("{vm} changed while its network policy was updated; try again");
     }
-    db.close().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn default_config() -> Config {
+        toml::from_str(crate::config::DEFAULT_CONFIG).unwrap()
+    }
+
+    /// Every preset turned on.
+    fn all_presets() -> Config {
+        let mut c = default_config();
+        c.network.allow = network::PRESETS.iter().map(|p| format!("preset:{p}")).collect();
+        c
+    }
+
+    // Invariants on the policy handed to microsandbox: deny by default, and
+    // only allow rules for names (no IPs, ranges, groups or "any").
+    fn check_policy(config: &Config) {
+        let p = serde_json::to_value(policy(config).unwrap()).unwrap();
+        assert_eq!(p["default_egress"], "deny");
+        assert_eq!(p["default_ingress"], "deny");
+        let rules = p["rules"].as_array().unwrap();
+        assert!(!rules.is_empty());
+        for rule in rules {
+            assert_eq!(rule["action"], "allow", "{rule}");
+            assert_eq!(rule["direction"], "egress", "{rule}");
+            let dest = rule["destination"].as_object().unwrap();
+            assert_eq!(dest.len(), 1, "{rule}");
+            let (kind, name) = dest.iter().next().unwrap();
+            assert!(kind == "domain" || kind == "domain_suffix", "{rule}");
+            let name = name.as_str().unwrap();
+            // A suffix like "com" would allow a whole TLD.
+            if kind == "domain_suffix" {
+                assert!(name.split('.').count() >= 2, "suffix too broad: {name}");
+            }
+        }
+    }
+
+    #[test]
+    fn default_policy_is_deny_by_default() {
+        check_policy(&default_config());
+    }
+
+    #[test]
+    fn every_preset_keeps_the_invariants() {
+        check_policy(&all_presets());
+    }
+
+    #[test]
+    fn empty_allowlist_has_no_rules() {
+        let mut c = default_config();
+        c.network.allow.clear();
+        let p = serde_json::to_value(policy(&c).unwrap()).unwrap();
+        assert_eq!(p["default_egress"], "deny");
+        assert_eq!(p["rules"], json!([]));
+    }
+
+    // Invariants on each secret: an env reference (never a raw value), only
+    // the configured hosts and headers, nothing else enabled.
+    #[test]
+    fn default_secrets_are_scoped_env_references() {
+        let c = default_config();
+        assert!(!c.secrets.is_empty());
+        for (env, s) in &c.secrets {
+            let e = serde_json::to_value(secret(SecretBuilder::new(), env, s).build()).unwrap();
+            assert_eq!(e["value"], "", "{env}: raw value in the spec");
+            assert_eq!(e["source"], json!({"kind": "env", "var": format!("WZ_SECRET_{env}")}));
+            let hosts: Vec<Value> = s.hosts.iter().map(|h| json!({"exact": h})).collect();
+            assert_eq!(e["allowed_hosts"], json!(hosts), "{env}");
+            assert_eq!(
+                e["substitution"],
+                json!({"headers": true, "header_fields": s.headers, "query": false, "body": false}),
+                "{env}"
+            );
+            assert_eq!(e["passthrough_hosts"], json!([]), "{env}");
+            assert_eq!(e["require_tls_identity"], true, "{env}");
+            assert!(e.get("violation_action").is_none(), "{env}");
+        }
+    }
+
+    #[test]
+    fn secret_values_never_reach_the_spec() {
+        let s = SecretConfig {
+            source: "env:PATH".into(),
+            hosts: vec!["a.example".into()],
+            headers: vec!["authorization".into()],
+        };
+        let path = std::env::var("PATH").unwrap();
+        let text = serde_json::to_string(&secret(SecretBuilder::new(), "T", &s).build()).unwrap();
+        assert!(!text.contains(&path));
+    }
+
+    // Saved-config tests against a real 0.7.8 database row, captured by
+    // `WZ_UPDATE_FIXTURE=1 cargo vmtest fixture`.
+    const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/msb-0.7.8.db");
+    const FIXTURE_VM: &str = "wz-fixture";
+
+    async fn open_fixture() -> (tempfile::TempDir, SqliteConnection) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("msb.db");
+        std::fs::copy(FIXTURE, &path).unwrap();
+        let db = SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&path)).await.unwrap();
+        (dir, db)
+    }
+
+    fn saved(row: &str) -> SandboxConfig {
+        serde_json::from_str(row).unwrap()
+    }
+
+    #[tokio::test]
+    async fn fixture_matches_the_default_config() {
+        let (_dir, mut db) = open_fixture().await;
+        let (row, status) = read_row(&mut db, FIXTURE_VM).await.unwrap().unwrap();
+        assert!(STOPPED.contains(&status.as_str()), "{status}");
+        assert!(drift(&default_config(), &saved(&row)).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn policy_rewrite_round_trips() {
+        let (_dir, mut db) = open_fixture().await;
+        let (old, status) = read_row(&mut db, FIXTURE_VM).await.unwrap().unwrap();
+        let mut c = default_config();
+        c.network.allow.push("example.com".into());
+
+        let d = drift(&c, &saved(&old)).unwrap();
+        assert_eq!(d.describe(), "network.allow");
+        let new = with_policy(FIXTURE_VM, &old, d.policy.as_ref().unwrap()).unwrap();
+        update_row(&mut db, FIXTURE_VM, &old, &status, &new).await.unwrap();
+
+        let (row, _) = read_row(&mut db, FIXTURE_VM).await.unwrap().unwrap();
+        assert!(drift(&c, &saved(&row)).unwrap().is_empty());
+        // Only the policy changed.
+        let (mut a, mut b): (Value, Value) = (serde_json::from_str(&old).unwrap(), serde_json::from_str(&row).unwrap());
+        a["network"]["policy"] = Value::Null;
+        b["network"]["policy"] = Value::Null;
+        assert_eq!(a, b);
+        // And back.
+        let d = drift(&default_config(), &saved(&row)).unwrap();
+        let back = with_policy(FIXTURE_VM, &row, d.policy.as_ref().unwrap()).unwrap();
+        assert!(drift(&default_config(), &saved(&back)).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_refuses_a_changed_row() {
+        let (_dir, mut db) = open_fixture().await;
+        let (old, status) = read_row(&mut db, FIXTURE_VM).await.unwrap().unwrap();
+        let mut c = default_config();
+        c.network.allow.push("example.com".into());
+        let new = with_policy(FIXTURE_VM, &old, drift(&c, &saved(&old)).unwrap().policy.as_ref().unwrap()).unwrap();
+
+        // Someone else writes in between.
+        sqlx::query("UPDATE sandbox SET config = ? WHERE name = ?")
+            .bind(old.replacen('{', "{ ", 1))
+            .bind(FIXTURE_VM)
+            .execute(&mut db)
+            .await
+            .unwrap();
+        assert!(update_row(&mut db, FIXTURE_VM, &old, &status, &new).await.is_err());
+        // A changed status counts too.
+        let (cur, _) = read_row(&mut db, FIXTURE_VM).await.unwrap().unwrap();
+        assert!(update_row(&mut db, FIXTURE_VM, &cur, "Running", &new).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn rewrite_refuses_an_unknown_format() {
+        let (_dir, mut db) = open_fixture().await;
+        let (old, _) = read_row(&mut db, FIXTURE_VM).await.unwrap().unwrap();
+        let p = serde_json::to_value(policy(&default_config()).unwrap()).unwrap();
+
+        let mut moved: Value = serde_json::from_str(&old).unwrap();
+        let policy_value = moved["network"]["policy"].take();
+        moved["network"].as_object_mut().unwrap().remove("policy");
+        moved["egress"] = policy_value;
+        assert!(with_policy(FIXTURE_VM, &moved.to_string(), &p).is_err());
+
+        assert!(with_policy(FIXTURE_VM, "not json", &p).is_err());
+        assert!(with_policy(FIXTURE_VM, &old, &json!({"default_egress": "maybe"})).is_err());
+    }
+
+    #[tokio::test]
+    async fn secret_drift_both_directions() {
+        let (_dir, mut db) = open_fixture().await;
+        let (row, _) = read_row(&mut db, FIXTURE_VM).await.unwrap().unwrap();
+        let saved = saved(&row);
+
+        let mut c = default_config();
+        c.secrets.insert(
+            "EXTRA_TOKEN".into(),
+            SecretConfig {
+                source: "env:X".into(),
+                hosts: vec!["a.example".into()],
+                headers: vec!["authorization".into()],
+            },
+        );
+        let d = drift(&c, &saved).unwrap();
+        assert_eq!((d.upsert.as_slice(), d.remove.len()), (&["EXTRA_TOKEN".to_string()][..], 0));
+
+        let mut c = default_config();
+        c.secrets.remove("GH_TOKEN");
+        let d = drift(&c, &saved).unwrap();
+        assert_eq!((d.upsert.len(), d.remove.as_slice()), (0, &["GH_TOKEN".to_string()][..]));
+
+        // Narrowing a secret's hosts counts as a change.
+        let mut c = default_config();
+        c.secrets.get_mut("GH_TOKEN").unwrap().hosts.pop();
+        assert_eq!(drift(&c, &saved).unwrap().upsert, ["GH_TOKEN"]);
+    }
 }

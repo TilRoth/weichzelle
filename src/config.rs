@@ -117,11 +117,9 @@ pub fn state_dir() -> Result<PathBuf> {
 impl Config {
     pub fn load() -> Result<Self> {
         let path = config_path()?;
-        let text = std::fs::read_to_string(&path).with_context(|| {
-            format!("cannot read {} (run `weichzelle init` first)", path.display())
-        })?;
-        let config: Config =
-            toml::from_str(&text).with_context(|| format!("invalid config {}", path.display()))?;
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("cannot read {} (run `weichzelle init` first)", path.display()))?;
+        let config: Config = toml::from_str(&text).with_context(|| format!("invalid config {}", path.display()))?;
         config.validate()?;
         Ok(config)
     }
@@ -134,13 +132,16 @@ impl Config {
             bail!("vm.docker_disk_gib must be between 1 and 4096");
         }
         for (env, secret) in &self.secrets {
-            let valid_env = !env.is_empty()
-                && env.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+            let valid_env =
+                !env.is_empty() && env.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
             if !valid_env {
                 bail!("secret name `{env}` must be an UPPER_SNAKE_CASE env var");
             }
             if secret.hosts.is_empty() {
                 bail!("secret `{env}` needs at least one host");
+            }
+            if secret.hosts.iter().any(|h| h == "*") {
+                bail!("secret `{env}`: host `*` would send it anywhere; list the hosts");
             }
             if secret.headers.is_empty() {
                 bail!("secret `{env}`: empty `headers` would allow every header; list them");
@@ -163,9 +164,7 @@ pub fn init() -> Result<()> {
     let config = DEFAULT_CONFIG
         .replace("Your Name", &host_git("user.name").unwrap_or("Your Name".into()))
         .replace("you@example.com", &host_git("user.email").unwrap_or("you@example.com".into()));
-    for (path, content) in
-        [(config_path()?, config.as_str()), (containerfile_path()?, DEFAULT_CONTAINERFILE)]
-    {
+    for (path, content) in [(config_path()?, config.as_str()), (containerfile_path()?, DEFAULT_CONTAINERFILE)] {
         if path.exists() {
             println!("exists:  {}", path.display());
         } else {
@@ -205,6 +204,24 @@ mod tests {
         c.validate().unwrap();
         assert!(!c.herdr.copy_config);
         assert_eq!(c.vm.docker_disk_gib, 40);
+    }
+
+    #[test]
+    fn secret_needs_real_hosts_and_headers() {
+        let secret = |hosts: &str, headers: &str| {
+            let text = format!("{BASE}[secrets.T]\nsource = \"env:X\"\nhosts = {hosts}\nheaders = {headers}\n");
+            toml::from_str::<Config>(&text).unwrap().validate()
+        };
+        assert!(secret(r#"["a.example"]"#, r#"["authorization"]"#).is_ok());
+        assert!(secret("[]", r#"["authorization"]"#).is_err());
+        assert!(secret(r#"["*"]"#, r#"["authorization"]"#).is_err());
+        assert!(secret(r#"["a.example"]"#, "[]").is_err());
+    }
+
+    #[test]
+    fn secret_names_must_be_env_vars() {
+        let text = format!("{BASE}[secrets.lower]\nsource = \"env:X\"\nhosts = [\"a\"]\n");
+        assert!(toml::from_str::<Config>(&text).unwrap().validate().is_err());
     }
 
     #[test]

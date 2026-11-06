@@ -21,9 +21,10 @@ struct Denial {
     target: String,
 }
 
+/// Under microsandbox's home (`~/.microsandbox`, or `$MSB_HOME`).
 fn log_dir(vm: &str) -> Result<PathBuf> {
-    let home = dirs::home_dir().context("no home directory")?;
-    Ok(home.join(".microsandbox/sandboxes").join(vm).join("logs"))
+    let config = microsandbox::config::config().context("cannot read microsandbox's config")?;
+    Ok(config.sandboxes_dir().join(vm).join("logs"))
 }
 
 /// `2026-..Z DEBUG microsandbox_network::..: DNS query denied by network policy domain=x`

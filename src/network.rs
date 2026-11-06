@@ -7,12 +7,7 @@ use anyhow::{Result, bail};
 fn preset(name: &str) -> Option<&'static [&'static str]> {
     Some(match name {
         "llm" => &["api.anthropic.com"],
-        "github" => &[
-            "github.com",
-            "api.github.com",
-            "codeload.github.com",
-            "*.githubusercontent.com",
-        ],
+        "github" => &["github.com", "api.github.com", "codeload.github.com", "*.githubusercontent.com"],
         // mise version lookups and downloads. storage.googleapis.com serves
         // Claude Code (accepted risk: it serves every GCS bucket).
         "mise" => &[
@@ -42,6 +37,11 @@ fn preset(name: &str) -> Option<&'static [&'static str]> {
         _ => return None,
     })
 }
+
+/// Every preset name, for tests.
+#[cfg(test)]
+pub const PRESETS: [&str; 12] =
+    ["llm", "github", "mise", "opencode", "npm", "pypi", "cargo", "go", "node", "dockerhub", "ghcr", "mcr"];
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Allowlist {
@@ -80,15 +80,27 @@ mod tests {
 
     #[test]
     fn expands_presets_and_dedups() {
-        let list = expand(&[
-            "preset:github".into(),
-            "github.com".into(),
-            "*.example.com".into(),
-        ])
-        .unwrap();
+        let list = expand(&["preset:github".into(), "github.com".into(), "*.example.com".into()]).unwrap();
         assert_eq!(list.hosts.iter().filter(|h| *h == "github.com").count(), 1);
         assert!(list.suffixes.contains(&"githubusercontent.com".to_string()));
         assert!(list.suffixes.contains(&"example.com".to_string()));
+    }
+
+    #[test]
+    fn every_preset_resolves() {
+        for name in PRESETS {
+            assert!(preset(name).is_some_and(|hosts| !hosts.is_empty()), "{name}");
+        }
+    }
+
+    #[test]
+    fn default_config_lists_every_preset() {
+        for name in PRESETS {
+            assert!(
+                crate::config::DEFAULT_CONFIG.contains(name),
+                "preset {name} missing from the comment in assets/config.toml"
+            );
+        }
     }
 
     #[test]

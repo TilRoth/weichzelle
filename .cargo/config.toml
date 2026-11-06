@@ -1,0 +1,3 @@
+[alias]
+# VM tests (tests/vm): boot real VMs, one at a time. Filter: `cargo vmtest lifecycle`.
+vmtest = "test --test vm -- --ignored --test-threads=1 --nocapture"

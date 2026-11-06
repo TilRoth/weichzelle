@@ -26,14 +26,18 @@ behaviour changes.
 
 ```
 cargo build
-cargo test
-cargo clippy
+cargo test                 # fast tests, also in CI
+cargo clippy --all-targets
+cargo fmt
+cargo vmtest               # VM tests (tests/vm), e.g. `cargo vmtest lifecycle`
 ./target/debug/weichzelle <command>
 ```
 
-Testing in a VM needs KVM, the microsandbox runtime (`~/.microsandbox`, `msb`
-on PATH) and podman. Secrets live in the keyring under the service
-`weichzelle`.
+VM tests need KVM, the microsandbox runtime (`~/.microsandbox`, `msb` on
+PATH) and podman. They run in an isolated home (`~/.cache/weichzelle-test`)
+and never touch real VMs; see DESIGN.md, "Testing". A failed test keeps its
+VM: `MSB_HOME=~/.cache/weichzelle-test/msb msb exec wz-t-… -- bash`.
+Secrets live in the keyring under the service `weichzelle`.
 
 ## Rules
 
@@ -53,8 +57,12 @@ on PATH) and podman. Secrets live in the keyring under the service
   stopped VM's network policy and secrets in line with `config.toml` before
   every boot: secrets via the SDK's `modify` API, the policy by rewriting the
   saved config in `~/.microsandbox/db/msb.db` (no SDK API for it). That write
-  depends on 0.7.8's format: recheck it, and run the restart test, when
-  upgrading microsandbox. A running VM keeps its old rules.
+  depends on 0.7.8's format. When upgrading microsandbox: recheck it, run
+  `cargo vmtest`, and regenerate the fixture
+  (`WZ_UPDATE_FIXTURE=1 cargo vmtest lifecycle`, then `cargo test`). A running VM keeps its old rules.
+- **Tests:** a new guarantee gets a check in `tests/vm/probes.sh` (or the
+  invariant tests in `reconcile.rs`); a new preset goes into
+  `network::PRESETS`.
 - Keep code comments short and plain.
 
 ## Debugging a VM

@@ -157,6 +157,42 @@ weichzelle init                              # write default config
 weichzelle secret set|delete <name>          # keyring values
 ```
 
+## Testing
+
+Two layers. microsandbox's own suite covers its enforcement (secret
+substitution, header and host scoping, DNS, deep egress cases); weichzelle's
+tests check how weichzelle configures it, plus one end-to-end smoke check per
+guarantee, so an upgrade that changes defaults shows up.
+
+- **Fast tests** (`cargo test`, also in CI): config validation, preset
+  expansion, and invariants on the policy and secret spec handed to
+  microsandbox (deny by default, only name rules, no TLD-wide suffixes;
+  secrets are env references scoped to their hosts and headers, with
+  query and body substitution off). `reconcile.rs` runs against
+  `tests/fixtures/msb-0.7.8.db`, a sandbox row captured from a real 0.7.8 VM:
+  drift detection, the policy rewrite, and refusing a changed row or an
+  unknown format.
+- **VM tests** (`cargo vmtest`, local only, one VM at a time): clone
+  `github.com/TilRoth/weichzelle-fixture` into real VMs.
+  - `probes`: `tests/vm/probes.sh` runs in the guest and prints one
+    PASS/FAIL line per check: allowed and denied egress, NXDOMAIN, raw IPs,
+    IPv6, metadata IP, a denied name on an allowed IP, host ports (a host
+    listener counts hits), another VM, shared mounts and `/.msb` contents,
+    the host config and herdr config, secret placeholders, Docker with the
+    CA wrapper (run, build, denied), Docker's networks vs the guest's.
+  - `lifecycle`: provisioning idempotency, the running-VM note, restart
+    applying network and secret changes both ways, the rebuild guard,
+    destroy. It also checks that the saved config still has the fixture's
+    shape; `WZ_UPDATE_FIXTURE=1` rewrites the fixture instead.
+  - Dummy secrets start with `wzleak`. After create and after each
+    reconcile, the test home (database, configs, logs) and the guest are
+    searched for it.
+  - `WZ_TEST_GH_TOKEN` (optional): a real token, enables a push test.
+- **Isolation:** everything lives in `~/.cache/weichzelle-test`
+  (`MSB_HOME`, `XDG_CONFIG_HOME` per VM, `XDG_DATA_HOME`); the runtime comes
+  from `~/.microsandbox`. Real VMs, config and keyring are never touched.
+  Failed VMs are kept for debugging; the next run removes them.
+
 ## Accepted risks
 
 - A hijacked agent can *use* injected tokens: push junk to any repo the PAT
@@ -209,8 +245,6 @@ weichzelle secret set|delete <name>          # keyring values
 
 - Per-repo config sections with repo-scoped tokens.
 - GitHub App for short-lived tokens.
-- Automated `weichzelle selftest`, re-run on every microsandbox upgrade
-  (v1: manual checklist).
 - Containing the VMM process (dedicated user, jail).
 - neovim and lazygit inside the VM.
 - Two-phase start: boot with a wider install policy (e.g. `storage.googleapis.com`

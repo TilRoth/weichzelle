@@ -92,7 +92,13 @@ fn main() -> Result<()> {
     // and that must happen before the async runtime spawns threads.
     let boots_vm = matches!(
         cli.command,
-        Cmd::Create { .. } | Cmd::Attach { .. } | Cmd::Shell { .. } | Cmd::Start { .. } | Cmd::Restart { .. } | Cmd::Rebuild { .. } | Cmd::Destroy { force: false, .. }
+        Cmd::Create { .. }
+            | Cmd::Attach { .. }
+            | Cmd::Shell { .. }
+            | Cmd::Start { .. }
+            | Cmd::Restart { .. }
+            | Cmd::Rebuild { .. }
+            | Cmd::Destroy { force: false, .. }
     );
     if boots_vm {
         secrets::export_all(&config.secrets)?;

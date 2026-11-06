@@ -23,9 +23,7 @@ fn resolve(source: &str) -> Result<String> {
     if let Some(name) = source.strip_prefix("keyring:") {
         keyring::Entry::new(KEYRING_SERVICE, name)
             .and_then(|e| e.get_password())
-            .with_context(|| {
-                format!("keyring secret `{name}` not found (set it: weichzelle secret set {name})")
-            })
+            .with_context(|| format!("keyring secret `{name}` not found (set it: weichzelle secret set {name})"))
     } else if let Some(var) = source.strip_prefix("env:") {
         std::env::var(var).with_context(|| format!("host env var `{var}` is not set"))
     } else {
@@ -63,9 +61,7 @@ pub fn set(name: &str) -> Result<()> {
     if value.is_empty() {
         bail!("empty value");
     }
-    keyring::Entry::new(KEYRING_SERVICE, name)?
-        .set_password(value)
-        .context("cannot write to the OS keyring")?;
+    keyring::Entry::new(KEYRING_SERVICE, name)?.set_password(value).context("cannot write to the OS keyring")?;
     println!("stored `{name}` in the keyring");
     Ok(())
 }
@@ -77,4 +73,26 @@ pub fn delete(name: &str) -> Result<()> {
         .with_context(|| format!("cannot delete `{name}` from the keyring"))?;
     println!("deleted `{name}` from the keyring");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_env_sources() {
+        assert_eq!(resolve("env:PATH").unwrap(), std::env::var("PATH").unwrap());
+        assert!(resolve("env:WZ_TEST_SURELY_UNSET_VAR").is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_sources() {
+        assert!(resolve("PATH").is_err());
+        assert!(resolve("file:/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn host_var_is_prefixed() {
+        assert_eq!(host_var("GH_TOKEN"), "WZ_SECRET_GH_TOKEN");
+    }
 }
