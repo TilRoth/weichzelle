@@ -15,7 +15,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Agents run as a normal user (Claude Code refuses bypass mode as root).
-RUN userdel -r ubuntu && useradd -m -s /bin/bash -u 1000 -G docker agent \
- && echo 'agent ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agent \
- && mkdir -p /work && chown agent:agent /work \
- && echo 'eval "$(mise activate bash)"' >> /home/agent/.bashrc
+RUN userdel -r ubuntu && useradd -m -s /bin/bash -u 1000 -G docker insasse \
+ && echo 'insasse ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/insasse \
+ && mkdir -p /work && chown insasse:insasse /work \
+ && echo 'eval "$(mise activate bash)"' >> /home/insasse/.bashrc

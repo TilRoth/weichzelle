@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs inside the VM as `agent` on every start. Must be idempotent.
+# Runs inside the VM as `insasse` on every start. Must be idempotent.
 # Inputs (env): WZ_MISE_CONFIG, WZ_REPO_URL, WZ_REPO_DIR, WZ_GIT_NAME, WZ_GIT_EMAIL,
 # WZ_RUNC (assets/wz-runc),
 # WZ_HERDR_CONFIG (only set when herdr.copy_config is on)
@@ -55,7 +55,7 @@ setup_docker() {
     for _ in $(seq 40); do sudo docker info >/dev/null 2>&1 && break; sleep 0.5; done
     sudo docker info >/dev/null 2>&1 || return 1
   fi
-  docker info >/dev/null 2>&1 || log "warning: dockerd runs, but agent can't reach its socket"
+  docker info >/dev/null 2>&1 || log "warning: dockerd runs, but insasse can't reach its socket"
 }
 setup_docker || log "warning: docker setup failed (see /var/log/dockerd.log in the VM)"
 

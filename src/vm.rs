@@ -11,7 +11,8 @@ use crate::{image, network, secrets};
 
 const PREFIX: &str = "wz-";
 const LABEL_REPO: &str = "weichzelle.repo";
-const GUEST_USER: &str = "agent";
+const GUEST_USER: &str = "insasse";
+const GUEST_HOME: &str = "/home/insasse";
 const PROVISION: &str = include_str!("../assets/provision.sh");
 const WZ_RUNC: &str = include_str!("../assets/wz-runc");
 
@@ -95,7 +96,7 @@ async fn create_vm(config: &Config, name: &str, repo_url: &str) -> Result<Sandbo
         })
         // Hostname rules need TLS interception to see the real request target.
         .intercept_tls()
-        .env("PATH", "/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+        .env("PATH", format!("{GUEST_HOME}/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"))
         .env("LANG", "C.UTF-8")
         // herdr panes start $SHELL; without it they get /bin/sh (no line editing).
         .env("SHELL", "/bin/bash")
@@ -125,7 +126,7 @@ async fn shell_as_agent(sb: &Sandbox, script: &str, envs: &[(&str, String)]) -> 
     let script = script.to_string();
     let envs: Vec<(String, String)> = envs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
     sb.shell_with(script, |o| {
-        let mut o = o.user(GUEST_USER).cwd("/home/agent");
+        let mut o = o.user(GUEST_USER).cwd(GUEST_HOME);
         for (k, v) in envs {
             o = o.env(k, v);
         }
@@ -171,7 +172,7 @@ async fn provision(
     // exec (not attach) also works when the host has no terminal.
     let mut exec = sb
         .exec_stream_with("bash", |e| {
-            let mut e = e.args(["-c", PROVISION]).user(GUEST_USER).cwd("/home/agent").stdin_null();
+            let mut e = e.args(["-c", PROVISION]).user(GUEST_USER).cwd(GUEST_HOME).stdin_null();
             for (k, v) in &envs {
                 e = e.env(*k, v.clone());
             }

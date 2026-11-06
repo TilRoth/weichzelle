@@ -32,7 +32,7 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
   GitHub's `ubuntu-latest`) with OS packages, git, jq and mise. Built with
   podman (or buildah or docker) and imported into microsandbox. The image tag is a hash of the Containerfile, so editing it
   triggers a new build on the next `create` or `rebuild`.
-- **Non-root user:** agents run as `agent` (uid 1000) with passwordless sudo.
+- **Non-root user:** agents run as `insasse` (uid 1000) with passwordless sudo.
   Claude Code refuses bypass mode as root. sudo gives nothing extra, because
   the VM is the boundary.
 - **mise:** weichzelle writes the global mise config (`~/.config/mise/config.toml`)
@@ -56,13 +56,13 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
   sets the onboarding and trust flags in `~/.claude.json` and turns off
   auto-updates. It doesn't set bypass mode as the default; pass
   `--dangerously-skip-permissions` when starting.
-- **Provisioning** (`assets/provision.sh`) runs as `agent` on every start, and
+- **Provisioning** (`assets/provision.sh`) runs as `insasse` on every start, and
   must be idempotent. It writes the global mise config and installs it, sets
   the git identity and a credential helper that answers with the `GH_TOKEN`
   placeholder, clones the repo on the first run, installs the repo's mise
   toolchain (a failure only warns), and writes the harness profiles.
 - **Docker:** Ubuntu's `docker.io` with buildx and compose, in every VM.
-  `agent` is in the `docker` group (no more than its sudo). There is no init
+  `insasse` is in the `docker` group (no more than its sudo). There is no init
   system, so provisioning starts `dockerd` on every boot (log:
   `/var/log/dockerd.log`; a failure only warns). `/var/lib/docker` is a
   private sparse ext4 disk (`vm.docker_disk_gib`, default 40), because

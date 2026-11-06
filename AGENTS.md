@@ -45,7 +45,7 @@ on PATH) and podman. Secrets live in the keyring under the service
 - **microsandbox is pinned** (`=0.7.8`). Check the SDK source in
   `~/.cargo/registry/src/*/microsandbox-0.7.8` instead of guessing APIs. Many
   types live under `microsandbox::sandbox::` instead of the crate root.
-- **`provision.sh` must be idempotent.** It runs as `agent` on every start.
+- **`provision.sh` must be idempotent.** It runs as `insasse` on every start.
   Merge into existing harness config files (jq) instead of overwriting them.
 - **Secrets are exported** into the process env in `main` before the tokio
   runtime starts (`set_var` isn't safe once threads exist).
@@ -58,7 +58,7 @@ on PATH) and podman. Secrets live in the keyring under the service
 
 - `msb ls` lists all sandboxes; weichzelle's are prefixed `wz-`.
 - `msb exec` mangles quoted arguments. Pipe scripts in base64:
-  `msb exec wz-<name> -- sudo -E -u agent bash -c "echo <b64> | base64 -d | bash"`.
+  `msb exec wz-<name> -- sudo -E -u insasse bash -c "echo <b64> | base64 -d | bash"`.
   `-E` keeps the secret placeholders in the environment.
 - Logs: `~/.microsandbox/sandboxes/wz-<name>/logs/` (`runtime.log*`,
   `exec.log`). Denials: `weichzelle logs <name> --egress`.
