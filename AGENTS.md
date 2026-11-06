@@ -58,8 +58,8 @@ on PATH) and podman. Secrets live in the keyring under the service
 
 - `msb ls` lists all sandboxes; weichzelle's are prefixed `wz-`.
 - `msb exec` mangles quoted arguments. Pipe scripts in base64:
-  `msb exec wz-<name> -- sudo -E -u insasse bash -c "echo <b64> | base64 -d | bash"`.
-  `-E` keeps the secret placeholders in the environment.
+  `msb exec wz-<name> -- sudo -E -H -u insasse bash -c "echo <b64> | base64 -d | bash"`.
+  `-E` keeps the secret placeholders in the environment, `-H` sets `HOME`.
 - Logs: `~/.microsandbox/sandboxes/wz-<name>/logs/` (`runtime.log*`,
   `exec.log`). Denials: `weichzelle logs <name> --egress`.
 - Missing egress host: deny-all, run the failing install, read the deny log,
