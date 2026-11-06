@@ -72,12 +72,30 @@ pub fn egress(vm: &str, name: &str) -> Result<()> {
     let mut rows: Vec<_> = seen.into_iter().collect();
     rows.sort_by(|a, b| b.1.1.cmp(&a.1.1)); // most recent first
     println!("{:<6} {:<21} {:<14} TARGET", "COUNT", "LAST SEEN (UTC)", "KIND");
+    let mut hosts = Vec::new();
     for ((target, kind), (count, last)) in rows {
         let last = last.get(..19).unwrap_or(&last).replace('T', " ");
         println!("{count:<6} {last:<21} {kind:<14} {target}");
+        if is_hostname(&target) && !hosts.contains(&target) {
+            hosts.push(target);
+        }
     }
-    println!("\nallow a host by adding it to network.allow, then `weichzelle rebuild {name}`");
+    if !hosts.is_empty() {
+        println!("\nto allow, add to network.allow in {}:", crate::config::config_path()?.display());
+        for host in hosts {
+            println!("    \"{host}\",");
+        }
+        println!("then run `weichzelle restart {name}` (kills running agents)");
+    }
     Ok(())
+}
+
+/// Denials without a name only carry an address, which can't be allowed.
+fn is_hostname(target: &str) -> bool {
+    target.contains('.')
+        && target.parse::<std::net::IpAddr>().is_err()
+        && target.parse::<std::net::SocketAddr>().is_err()
+        && target.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
 }
 
 #[cfg(test)]
@@ -98,5 +116,14 @@ mod tests {
         let tls = "2026-10-18T19:53:26Z DEBUG microsandbox_network::engine::tcp::deny: TLS egress denied by default policy sni=a.b dst=1.2.3.4:443";
         assert_eq!(parse(tls).unwrap().target, "a.b");
         assert!(parse("2026 DEBUG msb_krun_devices::virtio: queue notify").is_none());
+    }
+
+    #[test]
+    fn suggests_only_hostnames() {
+        assert!(is_hostname("pypi.org"));
+        assert!(!is_hostname("1.2.3.4"));
+        assert!(!is_hostname("1.2.3.4:443"));
+        assert!(!is_hostname("[::1]:443"));
+        assert!(!is_hostname("?"));
     }
 }

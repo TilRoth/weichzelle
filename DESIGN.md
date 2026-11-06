@@ -110,13 +110,26 @@ steal credentials and exfiltrate data. Local, single user (no multi-tenancy).
   raw values**: raw values get persisted in the host-side sandbox config.
 - **Egress:** deny by default, plus presets (`llm`, `github`, `mise`,
   per-ecosystem registries). Rules match whole hostnames only (no paths). DNS
-  limited to allowlisted names; other names get NXDOMAIN. The policy is fixed
-  at create time, so changing it needs `rebuild`. The `mise` preset includes
+  limited to allowlisted names; other names get NXDOMAIN. The `mise` preset includes
   `storage.googleapis.com` (Claude Code downloads) and
   `tuf-repo-cdn.sigstore.dev` (attestation checks for GitHub releases, e.g.
   gh). The `opencode` preset allows `models.dev` and `opencode.ai` (release
   downloads since 2.x). Exact preset host lists are
   found empirically: deny-all, run the install, read the deny log.
+- **Changing rules:** `config.toml` is the only source; there are no
+  per-VM rules. Before each boot of a stopped VM (`start`, `restart`, or
+  `attach`/`shell` on a stopped VM) weichzelle compares the VM's saved
+  network policy and secrets with the config and updates them. Nothing
+  changes in a running VM (microsandbox can't change a live policy);
+  `attach`/`shell`/`start` on a running VM print a note when it differs, and
+  `restart` applies it (killing running agents).
+  Secrets go through the SDK's `modify` API, saved for the next start. The
+  policy has no SDK API, so weichzelle rewrites `network.policy` in the VM's
+  saved config in microsandbox's database (`msb.db`, table `sandbox`). The
+  write only happens while the VM is stopped, only if the row is unchanged
+  since it was read, and only if the result parses as a 0.7.8 config. After
+  both steps the comparison must come out clean; any mismatch refuses the
+  boot and points to `rebuild`.
 - **Deny log:** microsandbox logs denials at debug level in the per-VM
   runtime log, which rotates every 10 MB (four files). Debug output is mostly
   device noise, so the log covers about the last 40 minutes of heavy use.
@@ -138,6 +151,7 @@ weichzelle stop | start <name>
 weichzelle rebuild <name> [--force]          # wipe and recreate
 weichzelle destroy <name> [--force]
 weichzelle list
+weichzelle restart <name>                    # stop + start, applies config
 weichzelle logs <name> --egress              # denied requests
 weichzelle init                              # write default config
 weichzelle secret set|delete <name>          # keyring values
@@ -159,6 +173,10 @@ weichzelle secret set|delete <name>          # keyring values
   that only read a CA path the wrapper doesn't know fail too.
 - An agent can bypass the CA wrapper (root via sudo). It only breaks its own
   HTTPS.
+- weichzelle writes into microsandbox's internal database to change a VM's
+  network policy. A microsandbox upgrade that changes the format makes
+  `start` refuse (it never boots a half-applied policy), and weichzelle must
+  be fixed before VMs start again without a `rebuild`.
 - Agent PRs appear as the user's own (GitHub forbids self-approval).
 - With `herdr.copy_config` on, the agent can read the host herdr config
   (custom commands, paths in it).

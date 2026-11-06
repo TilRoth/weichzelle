@@ -4,10 +4,10 @@ use anyhow::{Context, Result, bail};
 use std::io::Write;
 
 use microsandbox::sandbox::{PullPolicy, SandboxHandle, SandboxStatus};
-use microsandbox::{ExecEvent, ExecOutput, LogLevel, NetworkPolicy, Sandbox, SecretSource};
+use microsandbox::{ExecEvent, ExecOutput, LogLevel, Sandbox};
 
 use crate::config::Config;
-use crate::{image, network, secrets};
+use crate::{image, reconcile};
 
 const PREFIX: &str = "wz-";
 const LABEL_REPO: &str = "weichzelle.repo";
@@ -72,13 +72,7 @@ fn toml_string(s: &str) -> String {
 
 async fn create_vm(config: &Config, name: &str, repo_url: &str) -> Result<Sandbox> {
     let image = image::ensure().await?;
-    let allow = network::expand(&config.network.allow)?;
-    // Deny everything (including DNS) except the allowlisted names.
-    let policy = NetworkPolicy::none()
-        .allow_domains(&allow.hosts)
-        .context("invalid host in network.allow")?
-        .allow_domain_suffixes(&allow.suffixes)
-        .context("invalid suffix in network.allow")?;
+    let policy = reconcile::policy(config)?;
 
     let mut builder = Sandbox::builder(vm_name(name))
         .image(image.as_str())
@@ -107,16 +101,7 @@ async fn create_vm(config: &Config, name: &str, repo_url: &str) -> Result<Sandbo
         .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
 
     for (env, secret) in &config.secrets {
-        builder = builder.secret(|s| {
-            let mut s = s
-                .env(env)
-                .source(SecretSource::Env { var: secrets::host_var(env) })
-                .substitute_in_header_fields(secret.headers.clone());
-            for host in &secret.hosts {
-                s = s.allow(host);
-            }
-            s
-        });
+        builder = builder.secret(|s| reconcile::secret(s, env, secret));
     }
 
     builder.create().await.context("cannot create the VM")
@@ -214,13 +199,24 @@ fn repo_label(h: &SandboxHandle) -> Result<String> {
 }
 
 /// Running sandbox for `name`, starting and re-provisioning it if needed.
+/// A start applies the current network.allow and secrets first.
 async fn running(config: &Config, name: &str) -> Result<Sandbox> {
     let h = handle(name).await?;
     if h.status_snapshot() == SandboxStatus::Running {
+        let drift = reconcile::drift(config, &h)?;
+        if !drift.is_empty() {
+            eprintln!(
+                "note: {} in config.toml changed since {name} started. \
+                 `weichzelle restart {name}` applies it (kills running agents)",
+                drift.describe()
+            );
+        }
         return h.connect().await.context("cannot connect to the VM");
     }
     let herdr_config = host_herdr_config(config)?;
     println!("starting {name}…");
+    reconcile::apply(config, &vm_name(name)).await?;
+    let h = handle(name).await?;
     let repo = repo_label(&h)?;
     let sb = h.start_detached().await.context("cannot start the VM")?;
     provision(config, &sb, name, &repo, herdr_config).await?;
@@ -284,6 +280,11 @@ pub async fn stop(name: &str) -> Result<()> {
     }
     println!("{name} stopped");
     Ok(())
+}
+
+pub async fn restart(config: &Config, name: &str) -> Result<()> {
+    stop(name).await?;
+    start(config, name).await
 }
 
 /// What would be lost if the VM's clone were deleted. This guards against

@@ -2,6 +2,7 @@ mod config;
 mod image;
 mod logs;
 mod network;
+mod reconcile;
 mod secrets;
 mod vm;
 
@@ -34,6 +35,9 @@ enum Cmd {
     Start { name: String },
     /// Stop a running VM. Its disk is kept.
     Stop { name: String },
+    /// Stop and start a VM, applying changes to network.allow and secrets.
+    /// Kills running agents.
+    Restart { name: String },
     /// Wipe the VM and its clone, then recreate it from the current image.
     Rebuild {
         name: String,
@@ -88,7 +92,7 @@ fn main() -> Result<()> {
     // and that must happen before the async runtime spawns threads.
     let boots_vm = matches!(
         cli.command,
-        Cmd::Create { .. } | Cmd::Attach { .. } | Cmd::Shell { .. } | Cmd::Start { .. } | Cmd::Rebuild { .. } | Cmd::Destroy { force: false, .. }
+        Cmd::Create { .. } | Cmd::Attach { .. } | Cmd::Shell { .. } | Cmd::Start { .. } | Cmd::Restart { .. } | Cmd::Rebuild { .. } | Cmd::Destroy { force: false, .. }
     );
     if boots_vm {
         secrets::export_all(&config.secrets)?;
@@ -102,6 +106,7 @@ fn main() -> Result<()> {
             Cmd::Shell { name } => vm::shell(&config, &name).await,
             Cmd::Start { name } => vm::start(&config, &name).await,
             Cmd::Stop { name } => vm::stop(&name).await,
+            Cmd::Restart { name } => vm::restart(&config, &name).await,
             Cmd::Rebuild { name, force } => vm::rebuild(&config, &name, force).await,
             Cmd::Destroy { name, force } => vm::destroy(&config, &name, force).await.map(|_| ()),
             Cmd::List => vm::list().await,

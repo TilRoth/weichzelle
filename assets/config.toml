@@ -30,6 +30,7 @@ gh = "latest"
 copy_config = false
 
 [network]
+# Changes apply on the next start (`weichzelle restart <name>`).
 # Deny by default. Entries: "host", "*.suffix" or "preset:<name>".
 # Presets: llm, github, mise, opencode, npm, pypi, cargo, go, node,
 # dockerhub, ghcr, mcr (container registries).

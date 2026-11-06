@@ -65,7 +65,7 @@ headers = ["authorization"]
 
 ```sh
 weichzelle secret set openrouter
-weichzelle rebuild <name>        # secrets are fixed when a VM is created
+weichzelle restart <name>        # applies network and secret changes
 ```
 
 Every listed secret must resolve, or VMs won't start. Remove the entries you
@@ -78,11 +78,13 @@ don't use (e.g. `CLAUDE_CODE_OAUTH_TOKEN` without a Claude subscription).
 | `create <url> [--name n]` | New VM with a fresh clone |
 | `attach <name>` / `shell <name>` | herdr / bash in the VM (starts it if stopped) |
 | `start` / `stop <name>` | Stop keeps the disk |
+| `restart <name>` | Stop and start; applies config changes (kills running agents) |
 | `rebuild <name>` | Wipe and recreate; refuses if there is unpushed work (`--force` skips) |
 | `destroy <name>` | Delete the VM and its clone |
 | `list` | List VMs |
 | `logs <name> --egress` | Hosts the VM tried to reach and was denied |
 | `secret set\|delete <name>` | Manage keyring secrets |
 
-Network rules and secrets are fixed when a VM is created; change them with
-`rebuild`. Tool versions and provisioning apply on the next start.
+Changes to `network.allow`, secrets, tool versions and provisioning apply on
+the next start (`restart`). A running VM keeps its old rules until then;
+`attach`, `shell` and `start` say so. VM resources need `rebuild`.

@@ -49,9 +49,12 @@ on PATH) and podman. Secrets live in the keyring under the service
   Merge into existing harness config files (jq) instead of overwriting them.
 - **Secrets are exported** into the process env in `main` before the tokio
   runtime starts (`set_var` isn't safe once threads exist).
-- **The network policy and secrets are fixed when a VM is created.** Changes
-  to them only reach a VM through `rebuild`. Tools and provisioning changes
-  apply on the next start.
+- **Config changes apply on the next start.** `src/reconcile.rs` brings a
+  stopped VM's network policy and secrets in line with `config.toml` before
+  every boot: secrets via the SDK's `modify` API, the policy by rewriting the
+  saved config in `~/.microsandbox/db/msb.db` (no SDK API for it). That write
+  depends on 0.7.8's format: recheck it, and run the restart test, when
+  upgrading microsandbox. A running VM keeps its old rules.
 - Keep code comments short and plain.
 
 ## Debugging a VM
