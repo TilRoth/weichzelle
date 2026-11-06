@@ -20,7 +20,8 @@ See [DESIGN.md](DESIGN.md) for the threat model and decisions.
 ## Quickstart
 
 ```sh
-cargo install --path .
+cargo install --locked --git https://github.com/TilRoth/weichzelle
+# or from a local clone: cargo install --locked --path .
 weichzelle init                    # writes ~/.config/weichzelle/{config.toml,Containerfile}
 $EDITOR ~/.config/weichzelle/config.toml   # set [git] name and email
 
