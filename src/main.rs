@@ -1,4 +1,5 @@
 mod config;
+mod doctor;
 mod image;
 mod logs;
 mod network;
@@ -61,6 +62,8 @@ enum Cmd {
         #[arg(long, required = true)]
         egress: bool,
     },
+    /// Check the host setup, and a VM's health if named. Changes nothing.
+    Doctor { name: Option<String> },
     /// Manage secret values in the OS keyring.
     Secret {
         #[command(subcommand)]
@@ -84,6 +87,14 @@ fn main() -> Result<()> {
         Cmd::Secret { command: SecretCmd::Set { name } } => return secrets::set(name),
         Cmd::Secret { command: SecretCmd::Delete { name } } => return secrets::delete(name),
         Cmd::Logs { name, .. } => return logs::egress(&vm::vm_name(name), name),
+        // Before loading the config: reporting a broken one is its job.
+        Cmd::Doctor { name } => {
+            let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+            if !rt.block_on(doctor::run(name.as_deref()))? {
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -116,7 +127,7 @@ fn main() -> Result<()> {
             Cmd::Rebuild { name, force } => vm::rebuild(&config, &name, force).await,
             Cmd::Destroy { name, force } => vm::destroy(&config, &name, force).await.map(|_| ()),
             Cmd::List => vm::list().await,
-            Cmd::Init | Cmd::Secret { .. } | Cmd::Logs { .. } => unreachable!(),
+            Cmd::Init | Cmd::Secret { .. } | Cmd::Logs { .. } | Cmd::Doctor { .. } => unreachable!(),
         }
     })
 }

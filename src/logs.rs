@@ -44,6 +44,40 @@ fn parse(line: &str) -> Option<Denial> {
     Some(Denial { time, kind: kind.to_string(), target })
 }
 
+/// Denials logged in the last `minutes`: (count, distinct targets).
+pub fn recent_denials(vm: &str, minutes: u64) -> Result<(usize, usize)> {
+    let dir = log_dir(vm)?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
+    let cutoff = utc_timestamp(now.saturating_sub(minutes * 60));
+    let mut count = 0;
+    let mut targets = std::collections::BTreeSet::new();
+    for file in FILES {
+        let Ok(text) = std::fs::read_to_string(dir.join(file)) else { continue };
+        for d in text.lines().filter_map(parse).filter(|d| d.time >= cutoff) {
+            count += 1;
+            targets.insert(d.target);
+        }
+    }
+    Ok((count, targets.len()))
+}
+
+/// `2026-10-18T19:53:26` (UTC) for seconds since the epoch. No `Z`, so it
+/// sorts before every log timestamp of that second, fractional or not.
+fn utc_timestamp(secs: u64) -> String {
+    let (days, rest) = (secs / 86400, secs % 86400);
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days as i64 + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}", rest / 3600, rest % 3600 / 60, rest % 60)
+}
+
 pub fn egress(vm: &str, name: &str) -> Result<()> {
     let dir = log_dir(vm)?;
     if !dir.exists() {
@@ -117,6 +151,18 @@ mod tests {
         let tls = "2026-10-18T19:53:26Z DEBUG microsandbox_network::engine::tcp::deny: TLS egress denied by default policy sni=a.b dst=1.2.3.4:443";
         assert_eq!(parse(tls).unwrap().target, "a.b");
         assert!(parse("2026 DEBUG msb_krun_devices::virtio: queue notify").is_none());
+    }
+
+    #[test]
+    fn formats_utc_timestamps() {
+        assert_eq!(utc_timestamp(0), "1970-01-01T00:00:00");
+        assert_eq!(utc_timestamp(1_771_342_406), "2026-02-17T15:33:26");
+        assert_eq!(utc_timestamp(951_782_400), "2000-02-29T00:00:00");
+        let cutoff = utc_timestamp(1_771_342_406);
+        for same_second in ["2026-02-17T15:33:26Z", "2026-02-17T15:33:26.5Z"] {
+            assert!(*same_second >= *cutoff, "{same_second}");
+        }
+        assert!(*"2026-02-17T15:33:25.9Z" < *cutoff);
     }
 
     #[test]

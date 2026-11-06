@@ -83,6 +83,7 @@ don't use (e.g. `CLAUDE_CODE_OAUTH_TOKEN` without a Claude subscription).
 | `destroy <name>` | Delete the VM and its clone |
 | `list` | List VMs |
 | `logs <name> --egress` | Hosts the VM tried to reach and was denied |
+| `doctor [name]` | Check the host setup and a VM's health; changes nothing |
 | `secret set\|delete <name>` | Manage keyring secrets |
 
 Changes to `network.allow`, secrets, tool versions and provisioning apply on

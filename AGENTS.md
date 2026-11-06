@@ -17,9 +17,10 @@ behaviour changes.
 - `src/network.rs`: egress presets and allowlist expansion.
 - `src/secrets.rs`: keyring/env secret sources.
 - `src/logs.rs`: egress denials from the microsandbox runtime log.
+- `src/doctor.rs`: `weichzelle doctor`, the read-only health report.
 - `assets/`: compiled into the binary: the default `config.toml` and
   `Containerfile` (written by `weichzelle init`), `provision.sh` (run in the
-  VM on every start) and `wz-runc` (installed over runc in the VM; gives
+  VM on every start), `doctor.sh` (health probes for `doctor`) and `wz-runc` (installed over runc in the VM; gives
   containers the interception CA).
 
 ## Commands

@@ -11,16 +11,16 @@ use crate::{image, reconcile};
 
 const PREFIX: &str = "wz-";
 const LABEL_REPO: &str = "weichzelle.repo";
-const GUEST_USER: &str = "insasse";
-const GUEST_HOME: &str = "/home/insasse";
+pub const GUEST_USER: &str = "insasse";
+pub const GUEST_HOME: &str = "/home/insasse";
 const PROVISION: &str = include_str!("../assets/provision.sh");
-const WZ_RUNC: &str = include_str!("../assets/wz-runc");
+pub const WZ_RUNC: &str = include_str!("../assets/wz-runc");
 
 pub fn vm_name(name: &str) -> String {
     format!("{PREFIX}{name}")
 }
 
-fn repo_dir(name: &str) -> String {
+pub fn repo_dir(name: &str) -> String {
     format!("/work/{name}")
 }
 
@@ -125,7 +125,7 @@ async fn shell_as_agent(sb: &Sandbox, script: &str, envs: &[(&str, String)]) -> 
 
 /// The host's herdr config, if `herdr.copy_config` is on. Read before the VM
 /// starts so a missing file fails early.
-fn host_herdr_config(config: &Config) -> Result<Option<String>> {
+pub fn host_herdr_config(config: &Config) -> Result<Option<String>> {
     if !config.herdr.copy_config {
         return Ok(None);
     }

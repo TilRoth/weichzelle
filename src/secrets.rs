@@ -31,6 +31,14 @@ fn resolve(source: &str) -> Result<String> {
     }
 }
 
+/// Whether `source` resolves to a non-empty value. The value is dropped.
+pub fn check(source: &str) -> Result<()> {
+    if resolve(source)?.is_empty() {
+        bail!("`{source}` is empty");
+    }
+    Ok(())
+}
+
 /// Resolve every secret and export it for microsandbox to pick up.
 ///
 /// Must run before the async runtime starts: setting env vars is only sound

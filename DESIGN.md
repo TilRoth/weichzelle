@@ -153,9 +153,24 @@ weichzelle destroy <name> [--force]
 weichzelle list
 weichzelle restart <name>                    # stop + start, applies config
 weichzelle logs <name> --egress              # denied requests
+weichzelle doctor [name]                     # health report, read-only
 weichzelle init                              # write default config
 weichzelle secret set|delete <name>          # keyring values
 ```
+
+**doctor** works like Neovim's `:checkhealth`: one line per check (`OK`,
+`WARN`, `ERROR`, `SKIP`) with advice under problems, exit 1 on any error.
+It never changes anything: no boot, no reconcile, no fixes, no network
+calls from the host. Host checks: config, Containerfile, image and
+builder, the runtime is 0.7.8, `/dev/kvm`, secret sources resolve (values
+never printed), herdr config. With a name, host-side VM checks: status,
+saved config format, drift from `config.toml`, image vs Containerfile,
+egress denials in the last hour. These are the only security-relevant
+checks. On a running VM, `assets/doctor.sh` also probes the guest (repo,
+mise tools, herdr, toolchain, dockerd, the runc wrapper, disk space). The
+guest can lie, so those results are informational, not a security audit,
+and the host keeps only `<id> ok|fail|skip` lines for known ids and writes
+every message itself: guest text never reaches the terminal.
 
 ## Testing
 
@@ -184,6 +199,8 @@ guarantee, so an upgrade that changes defaults shows up.
     applying network and secret changes both ways, the rebuild guard,
     destroy. It also checks that the saved config still has the fixture's
     shape; `WZ_UPDATE_FIXTURE=1` rewrites the fixture instead.
+  - `doctor`: a healthy VM is all OK; Docker down and a config change
+    warn; a stopped VM isn't booted; a missing secret exits 1.
   - Dummy secrets start with `wzleak`. After create and after each
     reconcile, the test home (database, configs, logs) and the guest are
     searched for it.

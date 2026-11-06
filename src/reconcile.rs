@@ -178,6 +178,20 @@ async fn write_policy(vm: &str, policy: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Whether the next `start` could rewrite this VM's network policy: the saved
+/// row has the 0.7.8 shape. Opens the database read-only and writes nothing.
+pub async fn check_format(vm: &str) -> Result<()> {
+    let path = microsandbox::config::config()?.home().join("db").join("msb.db");
+    let options = SqliteConnectOptions::new().filename(&path).read_only(true).busy_timeout(Duration::from_secs(5));
+    let mut db =
+        SqliteConnection::connect_with(&options).await.with_context(|| format!("cannot open {}", path.display()))?;
+    let (old, _) = read_row(&mut db, vm).await?.with_context(|| format!("no sandbox `{vm}` in {}", path.display()))?;
+    db.close().await?;
+    let saved: Value = serde_json::from_str(&old).with_context(|| format_error(vm))?;
+    let policy = saved.get("network").and_then(|n| n.get("policy")).with_context(|| format_error(vm))?;
+    with_policy(vm, &old, policy).map(|_| ())
+}
+
 /// A sandbox's saved config and status.
 async fn read_row(db: &mut SqliteConnection, vm: &str) -> Result<Option<(String, String)>> {
     Ok(sqlx::query_as("SELECT config, status FROM sandbox WHERE name = ?").bind(vm).fetch_optional(db).await?)

@@ -21,7 +21,7 @@ pub fn reference() -> Result<String> {
     Ok(format!("localhost/weichzelle-base:{}", &hash[..12]))
 }
 
-fn builder() -> Result<&'static str> {
+pub fn builder() -> Result<&'static str> {
     for tool in ["podman", "buildah", "docker"] {
         let found = Command::new(tool).arg("--version").output().is_ok_and(|o| o.status.success());
         if found {

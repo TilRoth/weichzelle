@@ -167,6 +167,74 @@ fn lifecycle() {
     assert!(!vm.sandbox_dir().exists(), "{} still exists", vm.sandbox_dir().display());
 }
 
+/// `doctor` on a healthy VM, then with Docker down, a config change, a
+/// stopped VM and a missing secret. It must never change anything.
+#[test]
+#[ignore = "boots VMs; run with `cargo vmtest`"]
+fn doctor() {
+    let _lock = serial();
+    let vm = Vm::new("doc");
+    // `doctor` reports a missing herdr as an error.
+    vm.edit_config(|c| {
+        c["tools"].as_table_mut().unwrap().insert("herdr".into(), "latest".into());
+    });
+    vm.create();
+    let has = |out: &str, line: &str| out.lines().any(|l| l.trim_start().starts_with(line));
+
+    // Healthy: no errors, and the only warning allowed is the known denials
+    // from provisioning (herdr.dev, downloads.claude.ai).
+    let out = vm.wz_ok(&["doctor", &vm.name]);
+    for line in [
+        "OK    running",
+        "OK    saved config has the 0.7.8 format",
+        "OK    network.allow and secrets match config.toml",
+        "OK    built from the current Containerfile",
+        "OK    repo cloned",
+        "OK    global tools installed",
+        "OK    herdr runs",
+        "OK    dockerd answers",
+        "OK    CA wrapper installed over runc",
+        "OK    root disk under 90% full",
+        "OK    Docker disk under 90% full",
+    ] {
+        assert!(has(&out, line), "missing `{line}`:\n{out}");
+    }
+    let unexpected: Vec<_> =
+        out.lines().filter(|l| l.contains("ERROR") || (l.contains("WARN") && !l.contains("egress denials"))).collect();
+    assert!(unexpected.is_empty(), "{out}");
+
+    // Docker down and a config change: warnings, still exit 0.
+    vm.guest_ok(
+        "sudo pkill -x dockerd; for _ in $(seq 20); do pgrep -x dockerd >/dev/null || exit 0; sleep 0.5; done; exit 1",
+    );
+    vm.edit_config(|c| c["network"]["allow"].as_array_mut().unwrap().push("example.com".into()));
+    let out = vm.wz_ok(&["doctor", &vm.name]);
+    assert!(has(&out, "WARN  dockerd answers"), "{out}");
+    assert!(has(&out, "WARN  network.allow changed in config.toml since it started"), "{out}");
+    assert!(!vm.can_fetch("https://example.com"), "doctor applied the config");
+
+    // Stopped: in-VM checks skipped, and doctor doesn't boot it.
+    vm.wz_ok(&["stop", &vm.name]);
+    let out = vm.wz_ok(&["doctor", &vm.name]);
+    assert!(has(&out, "SKIP  in-VM checks"), "{out}");
+    assert!(has(&out, "OK    network.allow changed in config.toml; applies on the next start"), "{out}");
+    let (_, list) = vm.wz(&["list"]);
+    assert!(list.lines().any(|l| l.starts_with(&vm.name) && l.contains("Stopped")), "{list}");
+
+    // A missing secret is an error: exit 1, value never printed.
+    vm.edit_config(|c| c["secrets"]["GH_TOKEN"]["source"] = "env:WZT_MISSING".into());
+    let (ok, out) = vm.wz(&["doctor", &vm.name]);
+    assert!(!ok, "{out}");
+    assert!(has(&out, "ERROR secret GH_TOKEN"), "{out}");
+    assert!(!out.contains(harness::LEAK), "{out}");
+
+    // Still unchanged: the saved policy differs from config.toml.
+    vm.edit_config(|c| c["secrets"]["GH_TOKEN"]["source"] = "env:WZT_GH".into());
+    let out = vm.wz_ok(&["doctor", &vm.name]);
+    assert!(has(&out, "OK    network.allow changed in config.toml"), "{out}");
+    assert!(env().sandboxes().contains(&vm.vm()));
+}
+
 /// Compare the live saved config's shape with the fixture's, or rewrite the
 /// fixture (`WZ_UPDATE_FIXTURE=1`).
 fn check_fixture(vm: &Vm) {
